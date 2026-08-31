@@ -63,14 +63,10 @@ Gemeten op deze machine, niet aangenomen:
 |---|---|
 | Architectuur | `arm64`, macOS 26 |
 | Swift | 6.2.4 |
-| Xcode | Niet geïnstalleerd — alleen Command Line Tools, en dat is **genoeg** (zie spike) |
-| MLX | `mlx` + `mlx-metal` 0.32.0 |
-| Parakeet-model | `mlx-community/parakeet-tdt-0.6b-v3` staat al in de HF-cache |
-| `parakeet-mlx` CLI | niet geïnstalleerd |
-
-Twee dingen die de architectuur bepalen:
-
-`parakeet-mlx` 0.5.2 **heeft** streaming: `transcribe_stream()` levert een `StreamingParakeet` met `add_audio()` en een doorlopend `.result`. Een eerdere versie van deze PRD beweerde het tegendeel op gezag van een blogpost. De geïnstalleerde package telt.
+| Xcode | Niet geïnstalleerd — alleen Command Line Tools, en dat is **genoeg** (twee spikes) |
+| STT | **FluidAudio 0.15.6**, Parakeet TDT 0.6b v3 als CoreML op de Neural Engine |
+| Model op schijf | 473 MB, in `~/Library/Application Support/FluidAudio/Models/` |
+| Python | **Niet gebruikt.** Zie de beslissing hieronder. |
 
 ## Spike: Xcode is niet nodig — 2026-08-31
 
@@ -88,11 +84,11 @@ De CLT-SDK op `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` bevat 295 fr
 
 Wat Xcode wél zou toevoegen: Interface Builder, `.xcodeproj`, simulators en previews. Geen daarvan is nodig voor een menubalk-app zonder vensters. **Niet installeren, ~15 GB bespaard.**
 
-Wat dit niet oplost: dat `parakeet-mlx` Python is. Zie de meting hieronder.
+## Spike 2: Parakeet in Python gemeten — 2026-08-31
 
-## Spike: Parakeet gemeten — 2026-08-31
+Historisch. Deze meting was correct maar leidde tot een verkeerde conclusie; ze staat hier omdat de vergelijking met spike 3 het ontwerp bepaalt.
 
-`parakeet-mlx` 0.5.2, model `parakeet-tdt-0.6b-v3` uit de HF-cache, met `HF_HUB_OFFLINE=1`. Script: `spikes/measure_parakeet.py`. Testaudio via `say -v Xander`, 16 kHz mono.
+`parakeet-mlx` 0.5.2, model `parakeet-tdt-0.6b-v3` uit de HF-cache, met `HF_HUB_OFFLINE=1`. Testaudio via `say -v Xander`, 16 kHz mono. Het meetscript is verwijderd samen met de rest van het Python-werk; deze tabel is wat ervan bewaard is.
 
 | Meting | Waarde |
 |---|---|
@@ -105,26 +101,48 @@ Wat dit niet oplost: dat `parakeet-mlx` Python is. Zie de meting hieronder.
 | streaming, 0,5 s-chunks | mediaan 199 ms, max 431 ms |
 | piek-geheugen | 1,35 GB |
 
-Drie dingen volgen hieruit, en ze bepalen het ontwerp:
+Twee dingen hieruit staan nog overeind:
 
-- **Het model moet warm blijven.** 9,5 s koude start tegen 0,14 s warm is een factor 68. Een proces per uiting starten is uitgesloten; er moet een langlevend proces zijn dat het model vasthoudt, in elk ontwerp, en dat proces kost 1,35 GB.
-- **VAD-gesegmenteerde batch verslaat streaming.** Een hele uiting van 8,7 s transcriberen kost 0,23 s — sneller dan de 3,7 s die streaming over dezelfde audio doet, en nauwkeuriger: streaming maakte er "dekteer" en "PitglabSpeeds" van waar batch "dicteer" en "Pitglab Speech" gaf. Streaming is alleen nodig als je tekst wilt zien terwijl je nog praat. **Default wordt batch-per-uiting**; streaming blijft beschikbaar voor live partials.
-- **Streaming heeft weinig marge.** 431 ms verwerken per 500 ms audio is 14 % speling in het slechtste stuk. Haalbaar, maar niet iets om hands-free op te bouwen zolang batch 38× realtime haalt.
+- **VAD-gesegmenteerde batch verslaat streaming.** Een hele uiting van 8,7 s transcriberen kost 0,23 s — sneller dan de 3,7 s die streaming over dezelfde audio doet, en nauwkeuriger: streaming maakte er "dekteer" en "PitglabSpeeds" van waar batch "dicteer" en "Pitglab Speech" gaf. Streaming is alleen nodig als je tekst wilt zien terwijl je nog praat. **Default is batch-per-uiting.**
+- Nederlands komt er goed uit; eigennamen niet ("Pitglab" voor "PitchLab"). Te verwachten, geen blocker.
 
-Nederlands komt er goed uit; eigennamen niet ("Pitglab" voor "PitchLab"). Dat is te verwachten en is geen blocker.
+Wat er níét uit volgde, hoewel het hier wel is geconcludeerd: dat de app Python moest worden.
 
-## Beslist: all-Python — 2026-08-31
+## Spike 3: Parakeet native in Swift — 2026-08-31
 
-`PL-690` is hiermee gesloten. **De app wordt Python: `rumps` + `pyobjc` voor de menubalk en de systeem-API's, `parakeet-mlx` voor STT, in één langlevend proces.**
+`PL-715` / `PIT-847`, uitgevoerd door de Paperclip Task Runner en nagedraaid door het board. Project: `spikes/swift-parakeet/`, verslag: `docs/spike-swift-parakeet.md`.
 
-De meting maakt de keuze eenzijdig. Omdat het model hoe dan ook warm moet blijven in een langlevend Python-proces, vermijdt een Swift-schil geen enkel probleem: je moet Python tóch meebundelen, en je krijgt er een IPC-laag en een tweede taal bovenop. Swift-native zou alleen winnen door `parakeet-mlx` te laten vallen voor een CoreML- of MLX-Swift-port van Parakeet, en dat is een project op zich met een onbewezen uitkomst.
+**FluidAudio 0.15.6** resolvet als SwiftPM-dependency en compileert met alleen Command Line Tools. Het laadt Parakeet TDT 0.6b v3 als CoreML op de Neural Engine — hetzelfde model, andere runtime.
 
-De prijs: bundelen tot één `.app` is lastiger in Python. Dat is te dragen, want de spike toonde dat een `.app` niets meer is dan een map met een `Info.plist` en een uitvoerbaar bestand, en auto-start kan ook via een LaunchAgent in plaats van `SMAppService`.
+| Meting (2,6 s audio) | Swift + CoreML | Python + MLX |
+|---|---|---|
+| koude start (model gecacht) | **0,47 s** | 9,5 s |
+| warme transcriptie | **0,12 s** | 0,14 s |
+| piek-geheugen | **79 MB** | 1,35 GB |
+| model op schijf | **473 MB** | 2,3 GB |
+
+Transcript: `Zet handsfree modus aan en typ dit bij de cursor.` Correct. Met een dode HTTPS-proxy draait hij door, dus offline werkt na de eenmalige modeldownload.
+
+FluidAudio bevat ook **VAD**, die R8 en de uiting-segmentatie nodig hebben. Die bouwen we dus niet zelf.
+
+Niet bewezen in deze spike: streaming-latency per chunk, gedrag op echte spraak met ruis, en inbedding in een `.app` met signing.
+
+## Beslist: puur Swift — 2026-08-31
+
+**De app is Swift. Geen Python.** SwiftPM, AppKit voor de menubalk, AVFoundation voor audio, Carbon voor de hotkeys, FluidAudio voor STT en VAD.
+
+De eerdere uitkomst all-Python is ingetrokken. Die redeneerde: het model moet warm blijven, `parakeet-mlx` is Python, dus het langlevende proces is Python, dus Swift levert niets op. Die keten klopt alleen als `parakeet-mlx` de enige manier is om Parakeet te draaien, en dat was een aanname die niet is getoetst. Spike 3 weerlegt hem: Swift is 24× sneller op koude start en gebruikt 17× minder geheugen, met dezelfde nauwkeurigheid.
+
+Het Python-werk is verwijderd — uit de integratiebranch, uit de losse branches en uit de history. Er is geen Python meer in dit project. Loopt FluidAudio ooit vast, dan is het terugvalpad Python als backend met een Swift-UI, met PCM erin en tekst eruit als enige brug; dat wordt dan opnieuw gebouwd, want er ligt niets meer om terug te halen. Gezien de meetwaarden hierboven is dat pad theoretisch.
 
 ## Open beslissingen
-2. **Invoegen bij de cursor: `CGEvent`-toetsaanslagen of pasteboard + Cmd-V.** Toetsaanslagen laten het plakbord met rust maar zijn traag bij lange tekst; plakken is direct maar overschrijft wat de gebruiker gekopieerd had. Bepaalt mede welke permissie R9 moet vragen.
-3. **Wat "afgeronde uiting" is in hands-free.** Stiltedrempel in seconden, en of die instelbaar moet zijn. SpeechButton gebruikt 3 s voor auto-enter.
-4. **Model-download bij eerste start.** Het model is ~2,5 GB. Meeleveren kan niet; ophalen bij eerste start is de enige netwerkafhankelijkheid die de app heeft en moet als zodanig gepresenteerd worden.
+
+De taalkeuze stond hier als nummer 1 en is beslist: puur Swift, zie hierboven.
+
+1. **Invoegen bij de cursor: `CGEvent`-toetsaanslagen of pasteboard + Cmd-V.** Toetsaanslagen laten het plakbord met rust maar zijn traag bij lange tekst; plakken is direct maar overschrijft wat de gebruiker gekopieerd had. Bepaalt mede welke permissie R9 moet vragen. HQ: `PL-702`.
+2. **Wat "afgeronde uiting" is in hands-free.** Stiltedrempel in seconden, en of die instelbaar moet zijn. SpeechButton gebruikt 3 s voor auto-enter. Nu FluidAudio de VAD levert, is de vraag welke van zijn parameters we blootstellen.
+3. **Model-download bij eerste start.** 473 MB. Meeleveren kan niet; ophalen bij eerste start is de enige netwerkafhankelijkheid die de app heeft en moet als zodanig gepresenteerd worden.
+4. **Streaming voor live partials.** Batch-per-uiting is de default. FluidAudio heeft een streaming-API (`StreamingUnifiedAsrManager`) die niet gemeten is. Pas oppakken als tekst-terwijl-je-praat gewenst blijkt.
 
 ## Definition of done
 
