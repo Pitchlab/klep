@@ -103,8 +103,41 @@ cat > "${CONTENTS}/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "==> ad-hoc codesign"
-codesign --force --sign - --identifier "${BUNDLE_ID}" "${APP_DIR}"
+# Tekenen met een stabiele identiteit als die er is, anders ad-hoc.
+#
+# Waarom dit uitmaakt: macOS koppelt TCC-toestemming (Microfoon, Toegankelijkheid,
+# Invoerbewaking) aan de code-identiteit, niet aan het pad. Ad-hoc tekenen geeft
+# elke build een nieuwe CDHash, dus elke herbouw maakt de toestemming ongeldig en
+# moet je alle vinkjes opnieuw zetten. Met een vaste identiteit blijft de hash
+# gelijk zolang de code niet verandert, en blijft de toestemming staan.
+#
+# De identiteit aanmaken (eenmalig, self-signed, alleen geldig op deze machine):
+#   openssl req -x509 -newkey rsa:2048 -keyout k.key -out c.crt -days 3650 -nodes \
+#     -subj "/CN=PitchLab Local Code Signing" -addext "extendedKeyUsage=critical,codeSigning"
+#   openssl pkcs12 -export -inkey k.key -in c.crt -out c.p12 -passout pass:x \
+#     -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
+#   security import c.p12 -k ~/Library/Keychains/login.keychain-db -P x -T /usr/bin/codesign -A
+#   sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+#     -k /Library/Keychains/System.keychain c.crt
+SIGN_IDENTITY="${PITCHLAB_SIGN_IDENTITY:-PitchLab Local Code Signing}"
+PREV_HASH="$(codesign -dvvv "${APP_DIR}" 2>&1 | awk -F= '/^CDHash=/{print $2}')"
+
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF "${SIGN_IDENTITY}"; then
+    echo "==> codesign met '${SIGN_IDENTITY}'"
+    codesign --force --sign "${SIGN_IDENTITY}" --identifier "${BUNDLE_ID}" "${APP_DIR}"
+else
+    echo "==> codesign ad-hoc (geen '${SIGN_IDENTITY}' in de keychain)"
+    echo "    LET OP: elke herbouw krijgt een nieuwe identiteit, dus je moet de"
+    echo "    TCC-vinkjes daarna opnieuw zetten. Zie de comment hierboven."
+    codesign --force --sign - --identifier "${BUNDLE_ID}" "${APP_DIR}"
+fi
 codesign --verify --verbose=2 "${APP_DIR}"
+
+NEW_HASH="$(codesign -dvvv "${APP_DIR}" 2>&1 | awk -F= '/^CDHash=/{print $2}')"
+if [ -n "${PREV_HASH}" ] && [ "${PREV_HASH}" != "${NEW_HASH}" ]; then
+    echo "==> ⚠️  CDHash veranderd (${PREV_HASH} -> ${NEW_HASH})"
+    echo "    macOS ziet dit als een andere app. Verwijder PitchlabSpeech uit"
+    echo "    Toegankelijkheid en Invoerbewaking en voeg hem opnieuw toe."
+fi
 
 echo "==> klaar: ${APP_DIR}"
