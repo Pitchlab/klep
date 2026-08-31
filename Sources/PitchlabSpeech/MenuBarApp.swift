@@ -239,18 +239,42 @@ public final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let selector: MicrophoneSelector
     private let launchAgent: LaunchAgentManager
+    /// De persistente stand van de twee globale hotkeys (hands-free, auto-enter),
+    /// zodat het statusitem beide standen toont zonder dat het menu open hoeft.
+    private let hotkeys: HotkeyStore
     private var model: MenuModel
 
     public init(
         selector: MicrophoneSelector = MicrophoneSelector(),
-        launchAgent: LaunchAgentManager
+        launchAgent: LaunchAgentManager,
+        hotkeys: HotkeyStore = HotkeyStore(defaults: UserDefaults.standard)
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.selector = selector
         self.launchAgent = launchAgent
+        self.hotkeys = hotkeys
         self.model = MenuModel()
         super.init()
         refresh()
+    }
+
+    /// De statusbalk-titel die beide hotkey-standen samenvat, bv. "HF● AE○".
+    private var hotkeyStatusTitle: String { hotkeys.status().statusItemTitle }
+
+    /// Tekent icoon plus hotkey-standen op de statusbalk-knop. Beide toggles zijn
+    /// zo afleesbaar zonder het menu te openen (spec PL-704).
+    private func drawStatusButton() {
+        guard let button = statusItem.button else { return }
+        button.image = NSImage(
+            systemSymbolName: model.state.symbolName,
+            accessibilityDescription: model.state.menuLabel)
+        button.imagePosition = .imageLeading
+        button.title = " " + hotkeyStatusTitle
+    }
+
+    /// Hertekent na een hotkey-toggle, zodat de balk de nieuwe stand meteen toont.
+    public func refreshHotkeyState() {
+        rebuildMenu()
     }
 
     /// Herbouwt het model uit de huidige microfoon-resolutie en auto-start-stand,
@@ -272,22 +296,22 @@ public final class MenuBarController: NSObject {
     /// latere taak) en tekent het icoon en de eerste menuregel opnieuw.
     public func update(state: SpeechState) {
         model.state = state
-        if let button = statusItem.button {
-            button.image = NSImage(
-                systemSymbolName: state.symbolName, accessibilityDescription: model.state.menuLabel)
-        }
+        drawStatusButton()
         rebuildMenu()
     }
 
     private func rebuildMenu() {
-        if let button = statusItem.button {
-            button.image = NSImage(
-                systemSymbolName: model.state.symbolName,
-                accessibilityDescription: model.state.menuLabel)
-        }
+        drawStatusButton()
         let menu = NSMenu()
 
         for line in model.headerLines() {
+            let item = NSMenuItem(title: line, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+
+        // De twee globale toggles voluit, onder de dicteer-sneltoetsen.
+        for line in hotkeys.status().menuLines() {
             let item = NSMenuItem(title: line, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -350,6 +374,7 @@ public final class MenuBarController: NSObject {
 /// `.accessory` zodat er geen Dock-icoon verschijnt, ook niet bij los starten.
 public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MenuBarController?
+    private var hotkeyManager: GlobalHotkeyManager?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -358,7 +383,24 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             ?? ""
         let launchAgent = LaunchAgentManager(
             agent: LaunchAgent(executablePath: executablePath))
-        controller = MenuBarController(launchAgent: launchAgent)
+        let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
+        let controller = MenuBarController(launchAgent: launchAgent, hotkeys: hotkeys)
+        self.controller = controller
+
+        // De twee globale hotkeys registreren en het statusitem hertekenen bij een
+        // toggle. Ontbreekt Input Monitoring, dan zet `start()` een expliciete
+        // melding klaar in plaats van stil te falen (spec PL-704).
+        let manager = GlobalHotkeyManager(store: hotkeys)
+        manager.onToggle = { [weak controller] _, _ in
+            controller?.refreshHotkeyState()
+        }
+        if !manager.start(), let notice = manager.permissionNotice {
+            let alert = NSAlert()
+            alert.messageText = "Sneltoetsen uitgeschakeld"
+            alert.informativeText = notice
+            alert.runModal()
+        }
+        self.hotkeyManager = manager
     }
 }
 
