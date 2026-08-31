@@ -3,7 +3,7 @@
 /// auto-start via een LaunchAgent die de app zelf schrijft en verwijdert.
 ///
 /// Twee lagen, gescheiden zodat de logica zonder AppKit-runloop te testen is:
-///  - Pure model-laag (`SpeechState`, `HotkeyBinding`, `MenuModel`, `LaunchAgent`,
+///  - Pure model-laag (`SpeechState`, `HotkeyToggleRow`, `MenuModel`, `LaunchAgent`,
 ///    `LaunchAgentManager`): de menu-teksten, de checkmarks en de LaunchAgent-plist
 ///    worden hier bepaald. Geen `NSStatusItem`, geen runloop — direct te testen.
 ///  - AppKit-laag (`MenuBarController`, `runMenuBarApp`), onder `#if canImport(AppKit)`:
@@ -45,31 +45,43 @@ public enum SpeechState: Sendable, Equatable {
     }
 }
 
-// MARK: - Hotkeys
+// MARK: - Hotkey-toggles
 
-/// Eén ingestelde sneltoets zoals het menu hem toont. De echte hotkey-afvang is
-/// een latere taak; hier draagt het model alleen de weergave, zodat het menu de
-/// ingestelde toetsen laat zien (spec) en de tekst te testen is.
-public struct HotkeyBinding: Sendable, Equatable {
-    /// Wat de toets doet, bv. "Dicteren (push-to-talk)".
-    public let action: String
-    /// De toetscombinatie als leesbare tekens, bv. "⌥Space".
-    public let keys: String
+/// Eén klikbare toggle-regel in het menu: welke actie, of hij aanstaat (voor de
+/// checkmark) en de ingestelde sneltoets die het menu ernaast als hint toont. Puur,
+/// zodat de test de titel, de stand en de hint kan nalopen zonder NSMenu.
+public struct HotkeyToggleRow: Sendable, Equatable {
+    public let action: HotkeyAction
+    /// De leesbare naam van de toggle, bv. "Hands-free".
+    public let title: String
+    /// Of de toggle aanstaat — bepaalt de checkmark.
+    public let isOn: Bool
+    /// De ingestelde sneltoets als leesbare hint, bv. "⌃⌥H".
+    public let shortcut: String
 
-    public init(action: String, keys: String) {
+    public init(action: HotkeyAction, title: String, isOn: Bool, shortcut: String) {
         self.action = action
-        self.keys = keys
+        self.title = title
+        self.isOn = isOn
+        self.shortcut = shortcut
     }
 
-    /// De menuregel: actie plus toetsen.
-    public var menuLine: String { "\(action): \(keys)" }
+    /// De menutitel: de naam met de sneltoets als hint ernaast. De stand komt van de
+    /// checkmark (`isOn`), niet uit de tekst.
+    public var menuTitle: String { "\(title)  \(shortcut)" }
+}
 
-    /// De sneltoetsen zoals de app ze standaard toont tot een hotkey-taak ze
-    /// instelbaar maakt. Push-to-talk op ⌥Space, wisselen op ⌥⇧Space.
-    public static let defaults: [HotkeyBinding] = [
-        HotkeyBinding(action: "Dicteren (push-to-talk)", keys: "⌥Space"),
-        HotkeyBinding(action: "Dicteren aan/uit", keys: "⌥⇧Space"),
-    ]
+/// De twee klikbare toggle-regels met hun stand en ingestelde sneltoets uit de
+/// hotkey-store — precies wat er echt geldt. Vervangt de vroegere hardgecodeerde
+/// push-to-talk-regels: geen verzonnen toetsen meer, alleen wat de store draagt.
+public func hotkeyToggleRows(store: HotkeyStore) -> [HotkeyToggleRow] {
+    HotkeyAction.allCases.map { action in
+        HotkeyToggleRow(
+            action: action,
+            title: action.title,
+            isOn: store.isOn(action),
+            shortcut: store.combo(for: action).display)
+    }
 }
 
 // MARK: - Menu-model
@@ -83,7 +95,6 @@ public struct MenuModel: Sendable, Equatable {
     public var activeMicrophone: String?
     /// Melding als de gekozen microfoon verdween en de app terugviel (R6), of nil.
     public var fallbackNotice: String?
-    public var hotkeys: [HotkeyBinding]
     /// De keuzelijst voor de microfoon-submenu.
     public var devices: [DeviceInfo]
     /// De id van het gekozen apparaat, voor de checkmark in het submenu.
@@ -94,7 +105,6 @@ public struct MenuModel: Sendable, Equatable {
         state: SpeechState = .idle,
         activeMicrophone: String? = nil,
         fallbackNotice: String? = nil,
-        hotkeys: [HotkeyBinding] = HotkeyBinding.defaults,
         devices: [DeviceInfo] = [],
         selectedDeviceID: String? = nil,
         autoStartEnabled: Bool = false
@@ -102,7 +112,6 @@ public struct MenuModel: Sendable, Equatable {
         self.state = state
         self.activeMicrophone = activeMicrophone
         self.fallbackNotice = fallbackNotice
-        self.hotkeys = hotkeys
         self.devices = devices
         self.selectedDeviceID = selectedDeviceID
         self.autoStartEnabled = autoStartEnabled
@@ -114,9 +123,6 @@ public struct MenuModel: Sendable, Equatable {
         return "Microfoon: (geen)"
     }
 
-    /// De hotkey-regels, één per binding.
-    public var hotkeyLines: [String] { hotkeys.map(\.menuLine) }
-
     /// De titel van de auto-start-schakelaar (de checkmark komt van `autoStartEnabled`).
     public var autoStartTitle: String { "Start automatisch bij inloggen" }
 
@@ -125,13 +131,12 @@ public struct MenuModel: Sendable, Equatable {
         devices.map { ($0.localizedName, $0.uniqueID == selectedDeviceID) }
     }
 
-    /// De statische regels van bovenaf, in menuvolgorde: staat, microfoon,
-    /// eventueel de terugval-melding, dan de hotkeys. Handig voor de test die de
-    /// hele bovenkant in één keer nakijkt.
+    /// De statische regels van bovenaf, in menuvolgorde: staat, microfoon en
+    /// eventueel de terugval-melding. De hotkey-toggles komen daaronder als eigen
+    /// klikbare items (`hotkeyToggleRows`), niet als tekst hier.
     public func headerLines() -> [String] {
         var lines = [state.menuLabel, microphoneLine]
         if let fallbackNotice { lines.append("⚠︎ \(fallbackNotice)") }
-        lines.append(contentsOf: hotkeyLines)
         return lines
     }
 }
@@ -242,39 +247,107 @@ public final class MenuBarController: NSObject {
     /// De persistente stand van de twee globale hotkeys (hands-free, auto-enter),
     /// zodat het statusitem beide standen toont zonder dat het menu open hoeft.
     private let hotkeys: HotkeyStore
+    /// De luister-stip, als die er is. Het menu biedt "terug naar het midden" alleen
+    /// als de stip gekoppeld is, zodat een dood item nooit verschijnt.
+    private let listeningIndicator: ListeningIndicatorController?
     private var model: MenuModel
 
     public init(
         selector: MicrophoneSelector = MicrophoneSelector(),
         launchAgent: LaunchAgentManager,
-        hotkeys: HotkeyStore = HotkeyStore(defaults: UserDefaults.standard)
+        hotkeys: HotkeyStore = HotkeyStore(defaults: UserDefaults.standard),
+        listeningIndicator: ListeningIndicatorController? = nil
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.selector = selector
         self.launchAgent = launchAgent
         self.hotkeys = hotkeys
+        self.listeningIndicator = listeningIndicator
         self.model = MenuModel()
         super.init()
         refresh()
     }
 
-    /// De statusbalk-titel die beide hotkey-standen samenvat, bv. "HF● AE○".
-    private var hotkeyStatusTitle: String { hotkeys.status().statusItemTitle }
+    /// Hoogte van de samengestelde statusbalk-glyph in punten; de menubalk schaalt
+    /// een template-`NSImage` naar zijn dikte, dit bepaalt de tekenresolutie.
+    private static let statusGlyphHeight: CGFloat = 18
 
-    /// Tekent icoon plus hotkey-standen op de statusbalk-knop. Beide toggles zijn
-    /// zo afleesbaar zonder het menu te openen (spec PL-704).
+    /// Tekent de staat plus beide hotkey-standen als één rij SF Symbols op de
+    /// statusbalk-knop, zonder tekstlabel — de vroegere "HF● AE○"-tekst is nu
+    /// `mic.fill`/`mic.slash` (hands-free) en `arrow.turn.down.left(.circle)`
+    /// (auto-enter), zie `HotkeyStatus.statusSymbols()` (PL-730). Beide toggles
+    /// blijven zo afleesbaar zonder het menu te openen (R3, spec PL-704). De hele
+    /// knop krijgt een VoiceOver-samenvatting via `accessibilityLabel`.
     private func drawStatusButton() {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(
-            systemSymbolName: model.state.symbolName,
-            accessibilityDescription: model.state.menuLabel)
-        button.imagePosition = .imageLeading
-        button.title = " " + hotkeyStatusTitle
+        let status = hotkeys.status()
+        var symbols: [(name: String, active: Bool, label: String)] = [
+            (model.state.symbolName, true, model.state.menuLabel)
+        ]
+        symbols += status.statusSymbols().map { ($0.systemName, $0.isActive, $0.accessibilityLabel) }
+
+        button.image = Self.composedStatusImage(from: symbols)
+        button.imagePosition = .imageOnly
+        button.title = ""
+        button.setAccessibilityLabel(status.accessibilityLabel)
+    }
+
+    /// Zet een rij symbolen om in één template-`NSImage`: elk symbool naast elkaar,
+    /// actieve vol en inactieve gedimd voor extra contrast. Template-rendering laat
+    /// de balk zelf tinten, zodat de glyph in licht en donker meekleurt. Een ontbrekend
+    /// SF Symbol wordt overgeslagen zodat de knop nooit leeg blijft.
+    private static func composedStatusImage(
+        from symbols: [(name: String, active: Bool, label: String)]
+    ) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: statusGlyphHeight, weight: .regular)
+        let images: [(NSImage, Bool)] = symbols.compactMap { spec in
+            guard let base = NSImage(systemSymbolName: spec.name, accessibilityDescription: spec.label),
+                  let img = base.withSymbolConfiguration(config) else { return nil }
+            return (img, spec.active)
+        }
+        let gap: CGFloat = 3
+        let width = images.reduce(0) { $0 + $1.0.size.width } + gap * CGFloat(max(images.count - 1, 0))
+        let height = images.map(\.0.size.height).max() ?? statusGlyphHeight
+        let canvas = NSImage(size: NSSize(width: max(width, 1), height: max(height, 1)))
+        canvas.lockFocus()
+        var x: CGFloat = 0
+        for (img, active) in images {
+            let y = (height - img.size.height) / 2
+            img.draw(
+                at: NSPoint(x: x, y: y), from: .zero,
+                operation: .sourceOver, fraction: active ? 1.0 : 0.35)
+            x += img.size.width + gap
+        }
+        canvas.unlockFocus()
+        canvas.isTemplate = true
+        return canvas
     }
 
     /// Hertekent na een hotkey-toggle, zodat de balk de nieuwe stand meteen toont.
     public func refreshHotkeyState() {
         rebuildMenu()
+    }
+
+    /// Gezet door de delegate, die de live hotkey-manager kent om een opnieuw
+    /// ingestelde combinatie meteen te registreren. Krijgt de actie en de nieuwe
+    /// combinatie zodra het instellingenvenster er een toewijst.
+    public var onRebindHotkey: ((HotkeyAction, KeyCombo) -> Void)?
+    private var hotkeySettings: HotkeySettingsWindowController?
+
+    /// Opent het sneltoets-instellingenvenster (per actie een opnameveld + reset-knop).
+    /// De store is dezelfde als het statusitem gebruikt, dus een nieuwe combinatie is
+    /// meteen elders zichtbaar; `onRebindHotkey` registreert hem live.
+    @objc private func openHotkeySettings() {
+        let controller = hotkeySettings ?? HotkeySettingsWindowController(
+            store: hotkeys,
+            onRebind: { [weak self] action, combo in
+                self?.onRebindHotkey?(action, combo)
+                self?.refreshHotkeyState()
+            })
+        hotkeySettings = controller
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Herbouwt het model uit de huidige microfoon-resolutie en auto-start-stand,
@@ -285,7 +358,6 @@ public final class MenuBarController: NSObject {
             state: model.state,
             activeMicrophone: resolution.device?.localizedName,
             fallbackNotice: resolution.notice?.message,
-            hotkeys: HotkeyBinding.defaults,
             devices: selector.availableDevices(),
             selectedDeviceID: resolution.device?.uniqueID ?? selector.selectedDeviceID,
             autoStartEnabled: launchAgent.isEnabled())
@@ -310,10 +382,15 @@ public final class MenuBarController: NSObject {
             menu.addItem(item)
         }
 
-        // De twee globale toggles voluit, onder de dicteer-sneltoetsen.
-        for line in hotkeys.status().menuLines() {
-            let item = NSMenuItem(title: line, action: nil, keyEquivalent: "")
-            item.isEnabled = false
+        // De twee globale toggles als klikbare items: klikken wisselt dezelfde stand
+        // als de sneltoets, de checkmark toont de stand, de sneltoets staat ernaast
+        // als hint.
+        for row in hotkeyToggleRows(store: hotkeys) {
+            let item = NSMenuItem(
+                title: row.menuTitle, action: #selector(toggleHotkey(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = row.action.rawValue
+            item.state = row.isOn ? .on : .off
             menu.addItem(item)
         }
 
@@ -343,6 +420,20 @@ public final class MenuBarController: NSObject {
         autoStart.state = model.autoStartEnabled ? .on : .off
         menu.addItem(autoStart)
 
+        // Terughaalknop voor de stip: alleen tonen als er een stip gekoppeld is.
+        if listeningIndicator != nil {
+            let recenter = NSMenuItem(
+                title: "Zet luister-stip terug naar het midden",
+                action: #selector(recenterIndicator), keyEquivalent: "")
+            recenter.target = self
+            menu.addItem(recenter)
+        }
+
+        let hotkeySettings = NSMenuItem(
+            title: "Sneltoetsen…", action: #selector(openHotkeySettings), keyEquivalent: "")
+        hotkeySettings.target = self
+        menu.addItem(hotkeySettings)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
@@ -360,9 +451,23 @@ public final class MenuBarController: NSObject {
         refresh()
     }
 
+    /// Wisselt de aangeklikte hotkey-toggle — dezelfde `HotkeyStore.toggle` die de
+    /// globale sneltoets aanroept — en hertekent het menu zodat de checkmark en de
+    /// statusbalk de nieuwe stand tonen.
+    @objc private func toggleHotkey(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let action = HotkeyAction(rawValue: raw) else { return }
+        hotkeys.toggle(action)
+        refreshHotkeyState()
+    }
+
     @objc private func toggleAutoStart() {
         _ = try? launchAgent.toggle()
         refresh()
+    }
+
+    @objc private func recenterIndicator() {
+        listeningIndicator?.resetToCenter()
     }
 
     @objc private func quit() {
@@ -375,6 +480,7 @@ public final class MenuBarController: NSObject {
 public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MenuBarController?
     private var hotkeyManager: GlobalHotkeyManager?
+    private var listeningIndicator: ListeningIndicatorController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -384,7 +490,12 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let launchAgent = LaunchAgentManager(
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
-        let controller = MenuBarController(launchAgent: launchAgent, hotkeys: hotkeys)
+        // De luister-stip alvast koppelen zodat het "terug naar het midden"-menu-item
+        // werkt; het tonen/verbergen op luister-staat blijft aan de integratie.
+        let indicator = ListeningIndicatorController(levelSource: AudioLevelMeter())
+        self.listeningIndicator = indicator
+        let controller = MenuBarController(
+            launchAgent: launchAgent, hotkeys: hotkeys, listeningIndicator: indicator)
         self.controller = controller
 
         // De twee globale hotkeys registreren en het statusitem hertekenen bij een
@@ -393,6 +504,11 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let manager = GlobalHotkeyManager(store: hotkeys)
         manager.onToggle = { [weak controller] _, _ in
             controller?.refreshHotkeyState()
+        }
+        // Een in het instellingenvenster opnieuw ingestelde combinatie meteen live
+        // registreren, zodat de nieuwe sneltoets werkt zonder de app te herstarten.
+        controller.onRebindHotkey = { [weak manager] action, combo in
+            manager?.rebind(action, to: combo)
         }
         if !manager.start(), let notice = manager.permissionNotice {
             let alert = NSAlert()
