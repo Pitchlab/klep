@@ -70,12 +70,110 @@ import Testing
         #expect(KeyCombo(keyCode: 0, modifiers: [.control, .option]).carbonModifiers == 4096 + 2048)
     }
 
-    @Test func defaultsDifferPerAction() {
+    @Test func defaultsAreModifierOnlyRightCommand() {
         let hf = KeyCombo.default(for: .handsFree)
         let ae = KeyCombo.default(for: .autoEnter)
         #expect(hf != ae)
-        #expect(hf.modifiers == [.control, .option])
-        #expect(ae.modifiers == [.control, .option])
+        // Hands-free = kale rechter cmd; auto-enter = ⇧ + rechter cmd.
+        #expect(hf.keyCode == ModifierKey.rightCommand)
+        #expect(hf.modifiers == [])
+        #expect(hf.isModifierOnly)
+        #expect(ae.keyCode == ModifierKey.rightCommand)
+        #expect(ae.modifiers == [.shift])
+        #expect(ae.isModifierOnly)
+    }
+
+    @Test func regularKeycodeComboIsNotModifierOnly() {
+        #expect(KeyCombo(keyCode: 4, modifiers: [.control, .option]).isModifierOnly == false)
+        #expect(KeyCombo(keyCode: 49, modifiers: []).isModifierOnly == false)  // Space
+    }
+
+    // MARK: - Persistentie: één formaat voor beide soorten
+
+    @Test func modifierOnlyComboPersistsInTheSameFormat() {
+        // ⇧ = 1<<3 = 8, rechter cmd = 54.
+        let ae = KeyCombo.default(for: .autoEnter)
+        #expect(ae.persistString == "8:54")
+        #expect(KeyCombo.default(for: .handsFree).persistString == "0:54")
+        // En het leest ongewijzigd terug, mét zijn modifier-only aard.
+        let restored = KeyCombo(persistString: ae.persistString)
+        #expect(restored == ae)
+        #expect(restored?.isModifierOnly == true)
+    }
+
+    // MARK: - Modifier-toetsen: links/rechts en device-bits
+
+    @Test func modifierKeyLogicalMapping() {
+        #expect(ModifierKey.logicalModifier(for: 54) == .command)   // rechter cmd
+        #expect(ModifierKey.logicalModifier(for: 55) == .command)   // linker cmd
+        #expect(ModifierKey.logicalModifier(for: 56) == .shift)
+        #expect(ModifierKey.logicalModifier(for: 4) == nil)         // gewone toets
+    }
+
+    @Test func deviceMaskDistinguishesLeftFromRightCommand() {
+        // Rechter cmd omlaag: het rechter device-bit (0x10) staat aan, links niet.
+        #expect(ModifierKey.isKeyDown(keyCode: 54, deviceFlags: 0x10) == true)
+        #expect(ModifierKey.isKeyDown(keyCode: 55, deviceFlags: 0x10) == false)
+        // Alles uit: beide omhoog.
+        #expect(ModifierKey.isKeyDown(keyCode: 54, deviceFlags: 0x0) == false)
+    }
+
+    // MARK: - Modifier-tik-detectie (CGEventTap-model)
+
+    private func rightCommandDetector() -> ModifierTapDetector {
+        ModifierTapDetector(bindings: [
+            .init(action: .handsFree, keyCode: 54, requiredModifiers: []),
+            .init(action: .autoEnter, keyCode: 54, requiredModifiers: [.shift]),
+        ])
+    }
+
+    @Test func tapOnRightCommandFiresHandsFree() {
+        let d = rightCommandDetector()
+        #expect(d.process(.modifier(keyCode: 54, isDown: true, activeModifiers: [.command]), now: 0) == nil)
+        #expect(d.process(.modifier(keyCode: 54, isDown: false, activeModifiers: []), now: 0.1) == .handsFree)
+    }
+
+    @Test func tapOnShiftRightCommandFiresAutoEnter() {
+        let d = rightCommandDetector()
+        // Shift eerst vast, dan rechter cmd erbij: een tik mét shift.
+        _ = d.process(.modifier(keyCode: 56, isDown: true, activeModifiers: [.shift]), now: 0)
+        _ = d.process(.modifier(keyCode: 54, isDown: true, activeModifiers: [.command, .shift]), now: 0.05)
+        #expect(d.process(.modifier(keyCode: 54, isDown: false, activeModifiers: [.shift]), now: 0.1) == .autoEnter)
+    }
+
+    @Test func plainRightCommandTapDoesNotFireAutoEnter() {
+        // Zonder shift mag alleen hands-free vuren, niet auto-enter.
+        let d = rightCommandDetector()
+        _ = d.process(.modifier(keyCode: 54, isDown: true, activeModifiers: [.command]), now: 0)
+        #expect(d.process(.modifier(keyCode: 54, isDown: false, activeModifiers: []), now: 0.1) == .handsFree)
+    }
+
+    @Test func commandShortcutDoesNotToggle() {
+        // Rechter cmd ingedrukt houden met een gewone toets erbij (cmd-C) is een
+        // snelkoppeling, geen tik: de toggle mag NIET vuren.
+        let d = rightCommandDetector()
+        _ = d.process(.modifier(keyCode: 54, isDown: true, activeModifiers: [.command]), now: 0)
+        _ = d.process(.otherKey, now: 0.02)
+        #expect(d.process(.modifier(keyCode: 54, isDown: false, activeModifiers: []), now: 0.05) == nil)
+    }
+
+    @Test func longHoldWithoutOtherKeyDoesNotToggle() {
+        // Langer dan de maximale tik-tijd vastgehouden → geen toggle.
+        let d = rightCommandDetector()
+        _ = d.process(.modifier(keyCode: 54, isDown: true, activeModifiers: [.command]), now: 0)
+        #expect(d.process(.modifier(keyCode: 54, isDown: false, activeModifiers: []), now: 1.0) == nil)
+    }
+
+    @Test func leftCommandTapIsIgnored() {
+        // Alleen rechter cmd (54) is gebonden; linker cmd (55) doet niets.
+        let d = rightCommandDetector()
+        _ = d.process(.modifier(keyCode: 55, isDown: true, activeModifiers: [.command]), now: 0)
+        #expect(d.process(.modifier(keyCode: 55, isDown: false, activeModifiers: []), now: 0.1) == nil)
+    }
+
+    @Test func releaseWithoutMatchingDownIsIgnored() {
+        let d = rightCommandDetector()
+        #expect(d.process(.modifier(keyCode: 54, isDown: false, activeModifiers: []), now: 0) == nil)
     }
 
     // MARK: - Store: standaard en herdefinitie
