@@ -95,6 +95,9 @@ public struct MenuModel: Sendable, Equatable {
     public var activeMicrophone: String?
     /// Melding als de gekozen microfoon verdween en de app terugviel (R6), of nil.
     public var fallbackNotice: String?
+    /// Melding als de tekstuitvoer faalde (bv. ontbrekende Accessibility), of nil.
+    /// Geen stille mislukking: het menu toont dit in de header (R9).
+    public var errorNotice: String?
     /// De keuzelijst voor de microfoon-submenu.
     public var devices: [DeviceInfo]
     /// De id van het gekozen apparaat, voor de checkmark in het submenu.
@@ -105,6 +108,7 @@ public struct MenuModel: Sendable, Equatable {
         state: SpeechState = .idle,
         activeMicrophone: String? = nil,
         fallbackNotice: String? = nil,
+        errorNotice: String? = nil,
         devices: [DeviceInfo] = [],
         selectedDeviceID: String? = nil,
         autoStartEnabled: Bool = false
@@ -112,6 +116,7 @@ public struct MenuModel: Sendable, Equatable {
         self.state = state
         self.activeMicrophone = activeMicrophone
         self.fallbackNotice = fallbackNotice
+        self.errorNotice = errorNotice
         self.devices = devices
         self.selectedDeviceID = selectedDeviceID
         self.autoStartEnabled = autoStartEnabled
@@ -137,6 +142,7 @@ public struct MenuModel: Sendable, Equatable {
     public func headerLines() -> [String] {
         var lines = [state.menuLabel, microphoneLine]
         if let fallbackNotice { lines.append("⚠︎ \(fallbackNotice)") }
+        if let errorNotice { lines.append("⚠︎ \(errorNotice)") }
         return lines
     }
 }
@@ -251,6 +257,13 @@ public final class MenuBarController: NSObject {
     /// als de stip gekoppeld is, zodat een dood item nooit verschijnt.
     private let listeningIndicator: ListeningIndicatorController?
     private var model: MenuModel
+    /// De laatste uitvoerfout, bewaard los van `model` zodat `refresh()` (die het
+    /// model herbouwt uit microfoon + auto-start) de melding niet wist (R9).
+    private var errorNotice: String?
+    /// Aangeroepen als de hands-free-toggle via het menu wisselt, met de nieuwe stand.
+    /// De delegate hangt hier het starten/stoppen van de luister-keten aan, zodat de
+    /// menu-klik dezelfde keten start als de globale sneltoets (niet enkel een boolean).
+    public var onHandsFreeChanged: ((Bool) -> Void)?
 
     public init(
         selector: MicrophoneSelector = MicrophoneSelector(),
@@ -358,9 +371,25 @@ public final class MenuBarController: NSObject {
             state: model.state,
             activeMicrophone: resolution.device?.localizedName,
             fallbackNotice: resolution.notice?.message,
+            errorNotice: errorNotice,
             devices: selector.availableDevices(),
             selectedDeviceID: resolution.device?.uniqueID ?? selector.selectedDeviceID,
             autoStartEnabled: launchAgent.isEnabled())
+        rebuildMenu()
+    }
+
+    /// Het apparaat dat nu gebruikt wordt (of nil = systeemstandaard), zodat de
+    /// hands-free-keten op dezelfde microfoon opneemt als het menu toont.
+    public func resolvedDevice() -> DeviceInfo? {
+        selector.resolve().device
+    }
+
+    /// Toont (of wist met nil) een uitvoerfout in de menu-header en tekent opnieuw.
+    /// Geen stille mislukking: een falende TextOutput (bv. ontbrekende Accessibility)
+    /// wordt zo zichtbaar (R9).
+    public func showError(_ message: String?) {
+        errorNotice = message
+        model.errorNotice = message
         rebuildMenu()
     }
 
@@ -457,8 +486,12 @@ public final class MenuBarController: NSObject {
     @objc private func toggleHotkey(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let action = HotkeyAction(rawValue: raw) else { return }
-        hotkeys.toggle(action)
+        let isOn = hotkeys.toggle(action)
         refreshHotkeyState()
+        // De hands-free-toggle start/stopt de luister-keten, ook via het menu — niet
+        // alleen via de globale sneltoets. Zonder dit zou een menu-klik enkel de
+        // boolean wisselen (de bug die deze taak wegneemt).
+        if action == .handsFree { onHandsFreeChanged?(isOn) }
     }
 
     @objc private func toggleAutoStart() {
@@ -475,12 +508,26 @@ public final class MenuBarController: NSObject {
     }
 }
 
-/// De app-delegate: houdt de controller vast en zet de activatiepolicy op
-/// `.accessory` zodat er geen Dock-icoon verschijnt, ook niet bij los starten.
+/// De app-delegate: knoopt de hele keten aaneen. Houdt de menu-controller,
+/// hotkey-manager, warm-gehouden transcriber en de luister-stip vast, en start/stopt
+/// de hands-free-keten op de toggle (sneltoets én menu). `@MainActor` omdat alle
+/// AppKit-raakvlakken op de hoofdthread horen; zet de activatiepolicy op `.accessory`
+/// zodat er geen Dock-icoon verschijnt, ook niet bij los starten.
+@MainActor
 public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MenuBarController?
     private var hotkeyManager: GlobalHotkeyManager?
     private var listeningIndicator: ListeningIndicatorController?
+    /// De meter die de stip pollt; de keten voedt hem met het echte audioniveau.
+    private var levelMeter: AudioLevelMeter?
+
+    /// Warm gehouden over sessies heen: het transcriptie-model laadt bij de eerste
+    /// keer aanzetten, niet per uiting (koud 0,47 s, warm 0,12 s).
+    private let transcriber = WarmTranscriber()
+    /// De keten van de huidige luister-sessie plus de taak die hem draait. Vers per
+    /// hands-free-aan, opgeruimd bij uit; het model blijft warm in `transcriber`.
+    private var session: HandsFreeController?
+    private var runTask: Task<Void, Never>?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -490,20 +537,29 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let launchAgent = LaunchAgentManager(
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
-        // De luister-stip alvast koppelen zodat het "terug naar het midden"-menu-item
-        // werkt; het tonen/verbergen op luister-staat blijft aan de integratie.
-        let indicator = ListeningIndicatorController(levelSource: AudioLevelMeter())
+        // Eén stip-controller met de meter die de keten voedt: het menu koppelt hem
+        // voor "terug naar het midden", de keten toont/verbergt hem op luister-staat.
+        let meter = AudioLevelMeter()
+        let indicator = ListeningIndicatorController(levelSource: meter)
+        self.levelMeter = meter
         self.listeningIndicator = indicator
         let controller = MenuBarController(
             launchAgent: launchAgent, hotkeys: hotkeys, listeningIndicator: indicator)
         self.controller = controller
 
-        // De twee globale hotkeys registreren en het statusitem hertekenen bij een
-        // toggle. Ontbreekt Input Monitoring, dan zet `start()` een expliciete
-        // melding klaar in plaats van stil te falen (spec PL-704).
+        // De twee globale hotkeys registreren, het statusitem hertekenen bij een
+        // toggle, en de hands-free-toggle de keten laten starten/stoppen. Ontbreekt
+        // Input Monitoring, dan zet `start()` een expliciete melding klaar in plaats
+        // van stil te falen (spec PL-704).
         let manager = GlobalHotkeyManager(store: hotkeys)
-        manager.onToggle = { [weak controller] _, _ in
-            controller?.refreshHotkeyState()
+        manager.onToggle = { [weak self] action, isOn in
+            guard let self else { return }
+            self.controller?.refreshHotkeyState()
+            if action == .handsFree { self.setHandsFree(isOn) }
+        }
+        // Dezelfde keten starten/stoppen als de hands-free-toggle via het menu wisselt.
+        controller.onHandsFreeChanged = { [weak self] isOn in
+            self?.setHandsFree(isOn)
         }
         // Een in het instellingenvenster opnieuw ingestelde combinatie meteen live
         // registreren, zodat de nieuwe sneltoets werkt zonder de app te herstarten.
@@ -517,6 +573,49 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
         self.hotkeyManager = manager
+    }
+
+    /// Start of stop hands-free op basis van de nieuwe toggle-stand.
+    private func setHandsFree(_ isOn: Bool) {
+        if isOn { startHandsFree() } else { stopHandsFree() }
+    }
+
+    /// Hands-free aan: wis een oude fout, toon de luister-staat en draai een verse
+    /// keten op het gekozen apparaat. De `HandsFreeController` toont de stip (via de
+    /// bridge), warmt het model één keer en stuurt elke uiting naar de uitvoerlaag; een
+    /// uitvoerfout landt in het menu in plaats van stil te falen (R9). Auto-enter wordt
+    /// live uit de bewaarde stand gelezen zodat hij mid-sessie aan/uit kan.
+    private func startHandsFree() {
+        guard session == nil, let controller, let indicator = listeningIndicator,
+              let meter = levelMeter else { return }
+        controller.showError(nil)
+        controller.update(state: .listening)
+        let device = controller.resolvedDevice()
+
+        let handsFree = HandsFreeController(
+            audio: MicrophoneCapture(),
+            transcriber: transcriber,
+            sink: TextOutputSink(),
+            indicator: MainActorListeningIndicator(controller: indicator, meter: meter),
+            autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) })
+        self.session = handsFree
+
+        runTask = Task { [weak controller] in
+            await handsFree.setOnError { message in
+                Task { @MainActor in controller?.showError(message) }
+            }
+            await handsFree.run(device: device)
+        }
+    }
+
+    /// Hands-free uit: stop de opname (de stream sluit, de keten verbergt de stip),
+    /// zet de staat terug. Het model blijft warm in `transcriber`.
+    private func stopHandsFree() {
+        guard let handsFree = session else { return }
+        controller?.update(state: .idle)
+        session = nil
+        runTask = nil
+        Task { await handsFree.requestStop() }
     }
 }
 

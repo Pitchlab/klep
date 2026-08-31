@@ -15,6 +15,23 @@
 /// niet alleen dat hij aan staat — een gedempte microfoon laat de stip stil liggen.
 import Foundation
 
+// MARK: - Contract
+
+/// Wat de hands-free-keten de indicator laat doen: tonen bij het begin van luisteren,
+/// het niveau bijwerken zolang het loopt, en verbergen zodra hands-free uit gaat.
+/// `Sendable` + `AnyObject` zodat de `HandsFreeController`-actor hem nonisolated kan
+/// voeden. De productie-implementatie is `MainActorListeningIndicator`, die de
+/// main-actor `ListeningIndicatorController` bedient zonder diens isolatie te
+/// verzwakken; de tests injecteren een telbare dubbel.
+public protocol ListeningIndicating: AnyObject, Sendable {
+    /// Toon de indicator: hands-free is aan, de microfoon staat open.
+    func show()
+    /// Werk het getoonde niveau bij (0…1, RMS van de laatste audio).
+    func update(level: Float)
+    /// Verberg de indicator: hands-free is uit.
+    func hide()
+}
+
 // MARK: - Audioniveau
 
 /// Momentaan audioniveau, geklemd op 0…1. 0 is stilte (of gedempt), 1 is luid.
@@ -67,6 +84,14 @@ public final class AudioLevelMeter: AudioLevelSource, @unchecked Sendable {
     /// Zet het niveau terug naar stilte (bij stoppen met luisteren).
     public func reset() {
         lock.lock(); level = .silent; lock.unlock()
+    }
+
+    /// Zet het niveau rechtstreeks op een al berekende waarde. De hands-free-keten
+    /// levert per audiobuffer een kant-en-klaar RMS-niveau (`HandsFreeEvent.level`);
+    /// dat schrijft de bridge hier weg zodat de `ListeningIndicatorController` het bij
+    /// zijn volgende poll oppikt, in plaats van de samples nog eens te meten.
+    public func set(_ level: AudioLevel) {
+        lock.lock(); self.level = level; lock.unlock()
     }
 
     public var currentLevel: AudioLevel {
@@ -418,6 +443,38 @@ extension IndicatorDotView {
 
     override func mouseUp(with event: NSEvent) {
         controller?.endDrag()
+    }
+}
+
+// MARK: - Bridge naar de hands-free-keten
+
+/// Vervult de `ListeningIndicating`-rand met de bestaande main-actor
+/// `ListeningIndicatorController`, zonder diens isolatie te verzwakken. De
+/// `HandsFreeController`-actor roept `show`/`update`/`hide` nonisolated aan; een
+/// naïeve conformance op de controller zelf zou "conformance crosses into main
+/// actor-isolated code" geven. Daarom hopt `show`/`hide` naar de main actor waar het
+/// paneel leeft, en schrijft `update(level:)` het `Float`-niveau als `AudioLevel` in
+/// de meter die de controller pollt — zo volgt de stip het echte niveau zonder dat
+/// twee bronnen om de diameter vechten.
+public final class MainActorListeningIndicator: ListeningIndicating {
+    private let controller: ListeningIndicatorController
+    private let meter: AudioLevelMeter
+
+    public init(controller: ListeningIndicatorController, meter: AudioLevelMeter) {
+        self.controller = controller
+        self.meter = meter
+    }
+
+    public func show() {
+        Task { @MainActor in controller.show() }
+    }
+
+    public func update(level: Float) {
+        meter.set(AudioLevel(Double(level)))
+    }
+
+    public func hide() {
+        Task { @MainActor in controller.hide() }
     }
 }
 #endif

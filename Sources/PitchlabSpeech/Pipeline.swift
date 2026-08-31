@@ -53,7 +53,7 @@ public struct Pipeline {
     /// Schrijft 16 kHz mono samples naar een tijdelijke int16-wav (het formaat dat
     /// FluidAudio verwacht) zodat de bestaande URL-gebaseerde `Transcriber` een
     /// gesegmenteerde uiting kan verwerken.
-    private static func writeTemporaryWav(_ samples: [Float]) throws -> URL {
+    static func writeTemporaryWav(_ samples: [Float]) throws -> URL {
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: Double(UtteranceSegmenter.sampleRate),
