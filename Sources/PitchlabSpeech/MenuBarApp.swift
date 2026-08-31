@@ -328,6 +328,28 @@ public final class MenuBarController: NSObject {
         rebuildMenu()
     }
 
+    /// Gezet door de delegate, die de live hotkey-manager kent om een opnieuw
+    /// ingestelde combinatie meteen te registreren. Krijgt de actie en de nieuwe
+    /// combinatie zodra het instellingenvenster er een toewijst.
+    public var onRebindHotkey: ((HotkeyAction, KeyCombo) -> Void)?
+    private var hotkeySettings: HotkeySettingsWindowController?
+
+    /// Opent het sneltoets-instellingenvenster (per actie een opnameveld + reset-knop).
+    /// De store is dezelfde als het statusitem gebruikt, dus een nieuwe combinatie is
+    /// meteen elders zichtbaar; `onRebindHotkey` registreert hem live.
+    @objc private func openHotkeySettings() {
+        let controller = hotkeySettings ?? HotkeySettingsWindowController(
+            store: hotkeys,
+            onRebind: { [weak self] action, combo in
+                self?.onRebindHotkey?(action, combo)
+                self?.refreshHotkeyState()
+            })
+        hotkeySettings = controller
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     /// Herbouwt het model uit de huidige microfoon-resolutie en auto-start-stand,
     /// en tekent het menu opnieuw.
     public func refresh() {
@@ -407,6 +429,11 @@ public final class MenuBarController: NSObject {
             menu.addItem(recenter)
         }
 
+        let hotkeySettings = NSMenuItem(
+            title: "Sneltoetsen…", action: #selector(openHotkeySettings), keyEquivalent: "")
+        hotkeySettings.target = self
+        menu.addItem(hotkeySettings)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
@@ -477,6 +504,11 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let manager = GlobalHotkeyManager(store: hotkeys)
         manager.onToggle = { [weak controller] _, _ in
             controller?.refreshHotkeyState()
+        }
+        // Een in het instellingenvenster opnieuw ingestelde combinatie meteen live
+        // registreren, zodat de nieuwe sneltoets werkt zonder de app te herstarten.
+        controller.onRebindHotkey = { [weak manager] action, combo in
+            manager?.rebind(action, to: combo)
         }
         if !manager.start(), let notice = manager.permissionNotice {
             let alert = NSAlert()
