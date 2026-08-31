@@ -517,6 +517,9 @@ public final class MenuBarController: NSObject {
 public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MenuBarController?
     private var hotkeyManager: GlobalHotkeyManager?
+    /// De hotkey-store, vastgehouden zodat een geweigerde microfoontoestemming de
+    /// hands-free-toggle kan terugzetten (de keten start dan niet).
+    private var hotkeys: HotkeyStore?
     private var listeningIndicator: ListeningIndicatorController?
     /// De meter die de stip pollt; de keten voedt hem met het echte audioniveau.
     private var levelMeter: AudioLevelMeter?
@@ -537,6 +540,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let launchAgent = LaunchAgentManager(
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
+        self.hotkeys = hotkeys
         // Eén stip-controller met de meter die de keten voedt: het menu koppelt hem
         // voor "terug naar het midden", de keten toont/verbergt hem op luister-staat.
         let meter = AudioLevelMeter()
@@ -600,12 +604,28 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) })
         self.session = handsFree
 
-        runTask = Task { [weak controller] in
+        runTask = Task { [weak self, weak controller] in
             await handsFree.setOnError { message in
                 Task { @MainActor in controller?.showError(message) }
             }
-            await handsFree.run(device: device)
+            let started = await handsFree.run(device: device)
+            if !started {
+                // Toestemming geweigerd: de reden staat al in het menu (via onError →
+                // showError). Zet de toggle terug en ruim de sessie op, anders lijkt
+                // hands-free aan te staan terwijl er niets luistert.
+                await MainActor.run { self?.handsFreeStartDenied() }
+            }
         }
+    }
+
+    /// Ruimt op nadat de keten niet kon starten (microfoontoestemming geweigerd): zet
+    /// de hands-free-toggle terug, wis de sessie en zet de staat op gereed.
+    private func handsFreeStartDenied() {
+        session = nil
+        runTask = nil
+        hotkeys?.setOn(false, for: .handsFree)
+        controller?.update(state: .idle)
+        controller?.refreshHotkeyState()
     }
 
     /// Hands-free uit: stop de opname (de stream sluit, de keten verbergt de stip),
