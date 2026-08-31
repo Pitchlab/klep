@@ -242,17 +242,22 @@ public final class MenuBarController: NSObject {
     /// De persistente stand van de twee globale hotkeys (hands-free, auto-enter),
     /// zodat het statusitem beide standen toont zonder dat het menu open hoeft.
     private let hotkeys: HotkeyStore
+    /// De luister-stip, als die er is. Het menu biedt "terug naar het midden" alleen
+    /// als de stip gekoppeld is, zodat een dood item nooit verschijnt.
+    private let listeningIndicator: ListeningIndicatorController?
     private var model: MenuModel
 
     public init(
         selector: MicrophoneSelector = MicrophoneSelector(),
         launchAgent: LaunchAgentManager,
-        hotkeys: HotkeyStore = HotkeyStore(defaults: UserDefaults.standard)
+        hotkeys: HotkeyStore = HotkeyStore(defaults: UserDefaults.standard),
+        listeningIndicator: ListeningIndicatorController? = nil
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.selector = selector
         self.launchAgent = launchAgent
         self.hotkeys = hotkeys
+        self.listeningIndicator = listeningIndicator
         self.model = MenuModel()
         super.init()
         refresh()
@@ -384,6 +389,15 @@ public final class MenuBarController: NSObject {
         autoStart.state = model.autoStartEnabled ? .on : .off
         menu.addItem(autoStart)
 
+        // Terughaalknop voor de stip: alleen tonen als er een stip gekoppeld is.
+        if listeningIndicator != nil {
+            let recenter = NSMenuItem(
+                title: "Zet luister-stip terug naar het midden",
+                action: #selector(recenterIndicator), keyEquivalent: "")
+            recenter.target = self
+            menu.addItem(recenter)
+        }
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
@@ -406,6 +420,10 @@ public final class MenuBarController: NSObject {
         refresh()
     }
 
+    @objc private func recenterIndicator() {
+        listeningIndicator?.resetToCenter()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -416,6 +434,7 @@ public final class MenuBarController: NSObject {
 public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MenuBarController?
     private var hotkeyManager: GlobalHotkeyManager?
+    private var listeningIndicator: ListeningIndicatorController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -425,7 +444,12 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let launchAgent = LaunchAgentManager(
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
-        let controller = MenuBarController(launchAgent: launchAgent, hotkeys: hotkeys)
+        // De luister-stip alvast koppelen zodat het "terug naar het midden"-menu-item
+        // werkt; het tonen/verbergen op luister-staat blijft aan de integratie.
+        let indicator = ListeningIndicatorController(levelSource: AudioLevelMeter())
+        self.listeningIndicator = indicator
+        let controller = MenuBarController(
+            launchAgent: launchAgent, hotkeys: hotkeys, listeningIndicator: indicator)
         self.controller = controller
 
         // De twee globale hotkeys registreren en het statusitem hertekenen bij een

@@ -13,18 +13,20 @@ enum ListeningIndicatorTestSupport {
         let readBackY: Double
     }
 
-    /// Bewijst dat de positie een sessie overleeft: schrijf hem met de ene store weg
-    /// naar een geïsoleerde `UserDefaults`-suite, lees hem met een verse store terug
-    /// (zoals na een herstart). Ruimt de suite daarna op zodat de echte defaults
-    /// nooit geraakt worden.
-    static func runPositionPersistenceAcrossStores(x: Double, y: Double) -> PositionPersistence {
+    /// Bewijst dat de positie een sessie overleeft: schrijf de relatieve positie met de
+    /// ene store weg naar een geïsoleerde `UserDefaults`-suite, lees hem met een verse
+    /// store terug (zoals na een herstart). Ruimt de suite daarna op zodat de echte
+    /// defaults nooit geraakt worden.
+    static func runPositionPersistenceAcrossStores(
+        fractionX: Double, fractionY: Double
+    ) -> PositionPersistence {
         let suiteName = "pitchlab.speech.indicator.test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let writer = UserDefaultsIndicatorPositionStore(defaults: defaults)
         let emptyBeforeSave = writer.savedPosition() == nil
-        writer.save(IndicatorPosition(x: x, y: y))
+        writer.save(IndicatorPosition(fractionX: fractionX, fractionY: fractionY))
 
         // Verse store op dezelfde suite: simuleert een nieuwe sessie.
         let reader = UserDefaultsIndicatorPositionStore(defaults: defaults)
@@ -32,7 +34,7 @@ enum ListeningIndicatorTestSupport {
 
         return PositionPersistence(
             emptyBeforeSave: emptyBeforeSave,
-            readBackX: read?.x ?? .nan,
-            readBackY: read?.y ?? .nan)
+            readBackX: read?.fractionX ?? .nan,
+            readBackY: read?.fractionY ?? .nan)
     }
 }

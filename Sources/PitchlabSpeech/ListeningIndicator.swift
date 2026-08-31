@@ -77,15 +77,55 @@ public final class AudioLevelMeter: AudioLevelSource, @unchecked Sendable {
 
 // MARK: - Positie
 
-/// De schermpositie van de stip (onderkant-links, AppKit-coördinaten). Bewaard tussen
-/// sessies zodat de stip terugkomt waar je hem liet staan.
+/// De schermpositie van de stip als fractie van de zichtbare frame, 0…1 in beide assen
+/// (AppKit-coördinaten, onderkant-links). `0.5/0.5` is het midden. Relatief bewaard,
+/// niet in absolute punten, zodat de stip zichtbaar blijft als je een monitor
+/// loskoppelt of de resolutie verandert — een absolute punt-positie valt dan buiten
+/// beeld en dat is precies hoe de stip "kwijtraakte".
 public struct IndicatorPosition: Sendable, Equatable {
-    public let x: Double
-    public let y: Double
+    /// Horizontale fractie van de zichtbare frame, geklemd op 0…1.
+    public let fractionX: Double
+    /// Verticale fractie van de zichtbare frame, geklemd op 0…1.
+    public let fractionY: Double
 
-    public init(x: Double, y: Double) {
-        self.x = x
-        self.y = y
+    public init(fractionX: Double, fractionY: Double) {
+        self.fractionX = min(max(fractionX, 0), 1)
+        self.fractionY = min(max(fractionY, 0), 1)
+    }
+
+    /// Het midden van het scherm — de voorspelbare startplek zonder bewaarde positie
+    /// en het doel van het "terug naar het midden"-menu-item.
+    public static let center = IndicatorPosition(fractionX: 0.5, fractionY: 0.5)
+}
+
+/// Rekenwerk om een relatieve positie op een concreet scherm te plaatsen en andersom,
+/// los van AppKit zodat het testbaar is zonder venster. De `visible*`-waarden zijn de
+/// zichtbare frame van het scherm (menubalk en Dock eraf); `panel*` de grootte van het
+/// stip-venster. De fractie plaatst het MIDDEN van het venster; de oorsprong wordt
+/// daarna geklemd zodat het hele venster binnen de zichtbare frame blijft.
+public enum IndicatorGeometry {
+
+    /// De venster-oorsprong (onderkant-links) op één as voor een fractie. Klemt zo dat
+    /// het venster volledig binnen `[visibleMin, visibleMin + visibleLength]` valt; is
+    /// het scherm smaller dan het venster, dan wint `visibleMin` (nooit erbuiten links).
+    public static func origin(
+        fraction: Double, visibleMin: Double, visibleLength: Double, panelLength: Double
+    ) -> Double {
+        let center = visibleMin + fraction * visibleLength
+        let unclamped = center - panelLength / 2
+        let lo = visibleMin
+        let hi = visibleMin + visibleLength - panelLength
+        return min(max(unclamped, lo), max(lo, hi))
+    }
+
+    /// De fractie die bij een venster-oorsprong hoort (na slepen), zodat het opslaan
+    /// relatief gebeurt. Meet het midden van het venster tegen de zichtbare frame af.
+    public static func fraction(
+        origin: Double, visibleMin: Double, visibleLength: Double, panelLength: Double
+    ) -> Double {
+        guard visibleLength > 0 else { return 0.5 }
+        let center = origin + panelLength / 2
+        return min(max((center - visibleMin) / visibleLength, 0), 1)
     }
 }
 
@@ -96,11 +136,13 @@ public protocol IndicatorPositionStore: AnyObject {
     func save(_ position: IndicatorPosition)
 }
 
-/// `UserDefaults`-backed store — de positie blijft bewaard tussen sessies (R7).
+/// `UserDefaults`-backed store — de positie blijft bewaard tussen sessies (R7). Bewaart
+/// fracties onder eigen sleutels; de oude absolute-punt-sleutels worden bewust niet
+/// hergebruikt zodat een eerder opgeslagen punt niet als fractie wordt gelezen.
 public final class UserDefaultsIndicatorPositionStore: IndicatorPositionStore {
     private let defaults: UserDefaults
-    private let xKey = "pitchlab.speech.indicator.x"
-    private let yKey = "pitchlab.speech.indicator.y"
+    private let xKey = "pitchlab.speech.indicator.fx"
+    private let yKey = "pitchlab.speech.indicator.fy"
 
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
@@ -108,12 +150,12 @@ public final class UserDefaultsIndicatorPositionStore: IndicatorPositionStore {
         guard defaults.object(forKey: xKey) != nil,
               defaults.object(forKey: yKey) != nil else { return nil }
         return IndicatorPosition(
-            x: defaults.double(forKey: xKey), y: defaults.double(forKey: yKey))
+            fractionX: defaults.double(forKey: xKey), fractionY: defaults.double(forKey: yKey))
     }
 
     public func save(_ position: IndicatorPosition) {
-        defaults.set(position.x, forKey: xKey)
-        defaults.set(position.y, forKey: yKey)
+        defaults.set(position.fractionX, forKey: xKey)
+        defaults.set(position.fractionY, forKey: yKey)
     }
 }
 
@@ -237,18 +279,32 @@ public final class ListeningIndicatorController {
         moveToSavedOrDefaultPosition()
     }
 
-    /// Zet de stip op de bewaarde positie, of rechtsonder als er nog geen is.
+    /// Zet de stip op de bewaarde positie, of in het midden van het primaire scherm
+    /// als er nog geen is. De relatieve positie wordt via `IndicatorGeometry` op de
+    /// zichtbare frame geplaatst en geklemd, zodat de stip nooit buiten beeld valt.
     private func moveToSavedOrDefaultPosition() {
-        if let saved = positionStore.savedPosition() {
-            panel.setFrameOrigin(NSPoint(x: saved.x, y: saved.y))
-            return
-        }
-        if let screen = NSScreen.main {
-            let visible = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(
-                x: visible.maxX - Self.panelSize.width - 24,
-                y: visible.minY + 24))
-        }
+        place(positionStore.savedPosition() ?? .center)
+    }
+
+    /// Plaatst het stip-venster op een relatieve positie op het primaire scherm.
+    private func place(_ position: IndicatorPosition) {
+        guard let screen = NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let x = IndicatorGeometry.origin(
+            fraction: position.fractionX, visibleMin: Double(visible.minX),
+            visibleLength: Double(visible.width), panelLength: Double(Self.panelSize.width))
+        let y = IndicatorGeometry.origin(
+            fraction: position.fractionY, visibleMin: Double(visible.minY),
+            visibleLength: Double(visible.height), panelLength: Double(Self.panelSize.height))
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    /// Zet de stip terug naar het midden van het primaire scherm en bewaart die
+    /// positie. Het "terug naar het midden"-menu-item roept dit aan, zodat een stip die
+    /// buiten beeld raakte terug te halen is zonder de config te bewerken.
+    public func resetToCenter() {
+        positionStore.save(.center)
+        place(.center)
     }
 
     /// Toon de stip en begin het niveau te volgen. Aanroepen zodra luisteren start.
@@ -328,8 +384,22 @@ public final class ListeningIndicatorController {
     fileprivate func endDrag() {
         guard isDragging else { return }
         isDragging = false
+        positionStore.save(currentRelativePosition())
+    }
+
+    /// De relatieve positie van het venster nu, tegen de zichtbare frame van het
+    /// primaire scherm. Valt terug op het midden als er geen scherm is.
+    private func currentRelativePosition() -> IndicatorPosition {
+        guard let screen = NSScreen.main else { return .center }
+        let visible = screen.visibleFrame
         let origin = panel.frame.origin
-        positionStore.save(IndicatorPosition(x: Double(origin.x), y: Double(origin.y)))
+        return IndicatorPosition(
+            fractionX: IndicatorGeometry.fraction(
+                origin: Double(origin.x), visibleMin: Double(visible.minX),
+                visibleLength: Double(visible.width), panelLength: Double(Self.panelSize.width)),
+            fractionY: IndicatorGeometry.fraction(
+                origin: Double(origin.y), visibleMin: Double(visible.minY),
+                visibleLength: Double(visible.height), panelLength: Double(Self.panelSize.height)))
     }
 }
 
