@@ -31,6 +31,9 @@ let package = Package(
         .library(name: "PitchlabSpeech", targets: ["PitchlabSpeech"]),
         // Menubalk-binary die `scripts/build-app.sh` tot PitchlabSpeech.app verpakt.
         .executable(name: "PitchlabSpeechApp", targets: ["PitchlabSpeechApp"]),
+        // CLI-binary: `pitchlab-speech --once <wav>` transcribeert naar stdout,
+        // zodat spraak in een pipe past en de gate zonder microfoon draait.
+        .executable(name: "pitchlab-speech", targets: ["PitchlabSpeechCLI"]),
     ],
     dependencies: [
         // Parakeet TDT 0.6b v3 via CoreML/Neural Engine. Versie zoals bewezen in
@@ -48,6 +51,11 @@ let package = Package(
         // en het statusitem tonen is een mensentest; de logica staat in de library.
         .executableTarget(
             name: "PitchlabSpeechApp",
+            dependencies: ["PitchlabSpeech"]
+        ),
+        // Dunne CLI-instap: parseert `--once` en roept `Pipeline` in de library aan.
+        .executableTarget(
+            name: "PitchlabSpeechCLI",
             dependencies: ["PitchlabSpeech"]
         ),
         .testTarget(

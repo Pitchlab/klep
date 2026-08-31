@@ -1,3 +1,5 @@
 .build/
 .swiftpm/
 *.xcodeproj
+# Fixture-audio wordt met `say` gegenereerd, nooit gecommit (ROE §5).
+Tests/Fixtures/
