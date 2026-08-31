@@ -41,7 +41,11 @@ import Testing
         #expect(rows.map(\.action) == [.handsFree, .autoEnter])
         #expect(rows.map(\.title) == ["Hands-free", "Auto-enter"])
         // De ingestelde sneltoetsen uit de store, niet de vroegere push-to-talk.
-        #expect(rows.map(\.shortcut) == ["⌃⌥H", "⌃⌥E"])
+        // Deze literals volgen de defaults in Hotkeys.swift: sinds PL-732 is dat
+        // rechter ⌘ voor hands-free en ⇧ + rechter ⌘ voor auto-enter. Wijzigen de
+        // defaults, dan faalt deze test — dat is de bedoeling, want dan verandert
+        // ook wat de gebruiker in het menu leest.
+        #expect(rows.map(\.shortcut) == ["R⌘", "⇧R⌘"])
         #expect(!rows.contains(where: { $0.shortcut.contains("Space") }))
     }
 
