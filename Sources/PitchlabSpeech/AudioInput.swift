@@ -292,13 +292,16 @@ public actor UtteranceSegmenter {
 // MARK: - Live capture (productie, mensentest)
 
 /// Opent een AVCaptureSession op het gekozen apparaat, zet de audio om naar 16 kHz
-/// mono en voedt de segmenter. Levert afgeronde uitingen via een `AsyncStream`.
+/// mono en voedt de segmenter. Levert per opgevangen buffer het audioniveau voor de
+/// luister-indicator en per speech-eind een afgeronde uiting, samen als één
+/// `HandsFreeEvent`-stroom. Dat is de `HandsFreeAudioSource` die de
+/// `HandsFreeController` in productie eronder hangt.
 ///
 /// Runtime niet gedekt door de unit-tests: dit vraagt mic-permissie en echte
 /// hardware (PRD-mensentest, R7/R9). De build bewijst dat het compileert; de
 /// meetbare logica zit in `MicrophoneSelector`, `PreRollBuffer` en
-/// `UtteranceSegmenter` hierboven.
-public final class MicrophoneCapture: NSObject, @unchecked Sendable {
+/// `UtteranceSegmenter` hierboven, en de bedrading in `HandsFreeController`.
+public final class MicrophoneCapture: NSObject, HandsFreeAudioSource, @unchecked Sendable {
     public enum Failure: Error {
         case deviceNotFound(String)
         case cannotAddInput
@@ -314,17 +317,23 @@ public final class MicrophoneCapture: NSObject, @unchecked Sendable {
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: Double(UtteranceSegmenter.sampleRate),
         channels: 1, interleaved: false)!
-    private var continuation: AsyncStream<Utterance>.Continuation?
+    private var continuation: AsyncStream<HandsFreeEvent>.Continuation?
 
     public init(segmenter: UtteranceSegmenter = UtteranceSegmenter()) {
         self.segmenter = segmenter
         super.init()
     }
 
-    /// Start opnemen van `device` en geef een stroom afgeronde uitingen terug.
-    public func start(device: DeviceInfo) throws -> AsyncStream<Utterance> {
-        guard let avDevice = AVCaptureDevice(uniqueID: device.uniqueID) else {
-            throw Failure.deviceNotFound(device.uniqueID)
+    /// Start opnemen van `device` (nil = systeemstandaard) en geef de eventstroom
+    /// terug: audioniveaus voor de indicator plus afgeronde uitingen.
+    public func start(device: DeviceInfo?) throws -> AsyncStream<HandsFreeEvent> {
+        let avDevice: AVCaptureDevice
+        if let device, let picked = AVCaptureDevice(uniqueID: device.uniqueID) {
+            avDevice = picked
+        } else if let fallback = AVCaptureDevice.default(for: .audio) {
+            avDevice = fallback
+        } else {
+            throw Failure.deviceNotFound(device?.uniqueID ?? "systeemstandaard")
         }
         let input = try AVCaptureDeviceInput(device: avDevice)
 
@@ -342,7 +351,7 @@ public final class MicrophoneCapture: NSObject, @unchecked Sendable {
         session.addOutput(output)
         session.commitConfiguration()
 
-        let stream = AsyncStream<Utterance> { continuation in
+        let stream = AsyncStream<HandsFreeEvent> { continuation in
             self.continuation = continuation
         }
         session.startRunning()
@@ -353,10 +362,18 @@ public final class MicrophoneCapture: NSObject, @unchecked Sendable {
     public func stop() async {
         session.stopRunning()
         if let tail = try? await segmenter.finish() {
-            continuation?.yield(tail)
+            continuation?.yield(.utterance(tail))
         }
         continuation?.finish()
         continuation = nil
+    }
+
+    /// Het RMS-niveau (0…1) van een blok samples, voor de niveau-indicatie (R7).
+    static func rmsLevel(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        var sum: Float = 0
+        for sample in samples { sum += sample * sample }
+        return min(1, (sum / Float(samples.count)).squareRoot())
     }
 }
 
@@ -366,9 +383,11 @@ extension MicrophoneCapture: AVCaptureAudioDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         guard let samples = float16kMono(from: sampleBuffer) else { return }
+        let level = Self.rmsLevel(samples)
         Task { [segmenter, continuation] in
+            continuation?.yield(.level(level))
             guard let utterances = try? await segmenter.feed(samples) else { return }
-            for utterance in utterances { continuation?.yield(utterance) }
+            for utterance in utterances { continuation?.yield(.utterance(utterance)) }
         }
     }
 
