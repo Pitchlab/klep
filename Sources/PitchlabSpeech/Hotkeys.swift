@@ -102,7 +102,22 @@ public struct KeyCombo: Sendable, Equatable {
     /// De combinatie als leesbare tekst, bv. "⌃⌥H".
     public var display: String { modifierGlyphs + KeyCombo.keyName(for: keyCode) }
 
-    /// De combinatie als string voor persistentie: "<modifiers>:<keyCode>".
+    /// True als dit een modifier-only combo is (bv. rechter cmd): de `keyCode` is
+    /// zelf een modifier-toets, geen gewone toets. Carbon `RegisterEventHotKey` kan
+    /// zo'n kale modifier niet registreren — het vraagt een keycode plus een
+    /// modifier-masker — dus deze combo's lopen via de CGEventTap-laag
+    /// (`ModifierTapDetector`) in plaats van via Carbon.
+    public var isModifierOnly: Bool { ModifierKey.logicalModifier(for: keyCode) != nil }
+
+    /// De combinatie als string voor persistentie: "<modifiers>:<keyCode>". Eén
+    /// formaat voor allebei de soorten hotkeys:
+    ///  - een gewone keycode-hotkey bewaart de toetscode plus zijn modifier-masker
+    ///    (⌃⌥H → "6:4");
+    ///  - een modifier-only combo bewaart de modifier-keycode als `keyCode` en de
+    ///    meegevraagde modifiers in het masker (rechter cmd → "0:54",
+    ///    ⇧+rechter cmd → "8:54").
+    /// Het formaat draagt geen aparte vlag; `isModifierOnly` leidt het soort af uit
+    /// de keyCode, zodat oude bewaarde combo's ongewijzigd blijven werken.
     public var persistString: String { "\(modifiers.rawValue):\(keyCode)" }
 
     /// Leest een combinatie terug uit `persistString`. Nil bij een kapotte string.
@@ -128,12 +143,12 @@ public struct KeyCombo: Sendable, Equatable {
     }
 
     /// De standaardcombinatie per actie, tot de gebruiker ze herdefinieert.
-    /// Hands-free op ⌃⌥H, auto-enter op ⌃⌥E — buiten de dicteer-sneltoetsen die
-    /// het menu al toont (⌥Space / ⌥⇧Space).
+    /// Hands-free op rechter cmd, auto-enter op ⇧+rechter cmd. Allebei modifier-only
+    /// (via de CGEventTap-laag): ⌥Space viel af, die is al bezet door het dicteren.
     public static func `default`(for action: HotkeyAction) -> KeyCombo {
         switch action {
-        case .handsFree: return KeyCombo(keyCode: 4, modifiers: [.control, .option])   // H
-        case .autoEnter: return KeyCombo(keyCode: 14, modifiers: [.control, .option])  // E
+        case .handsFree: return KeyCombo(keyCode: ModifierKey.rightCommand, modifiers: [])         // rechter ⌘
+        case .autoEnter: return KeyCombo(keyCode: ModifierKey.rightCommand, modifiers: [.shift])   // ⇧ + rechter ⌘
         }
     }
 
@@ -149,7 +164,154 @@ public struct KeyCombo: Sendable, Equatable {
         case 0: return "A"
         case 8: return "C"
         case 2: return "D"
+        case ModifierKey.rightCommand: return "R⌘"
+        case ModifierKey.leftCommand: return "L⌘"
         default: return "key \(keyCode)"
+        }
+    }
+}
+
+// MARK: - Modifier-toetsen (links/rechts)
+
+/// De virtuele toetscodes van de modifier-toetsen, links en rechts apart. Deze zijn
+/// nodig voor modifier-only hotkeys (rechter cmd): Carbon `RegisterEventHotKey` kan
+/// een kale modifier niet registreren, dus die combo's lopen via een CGEventTap op
+/// `.flagsChanged`, waar links en rechts te onderscheiden zijn — rechter cmd is
+/// keycode 54, linker cmd 55, met een eigen device-bit in de event-flags. Puur en
+/// getest; de tap zelf zit in de Carbon/CoreGraphics-laag (mensentest).
+public enum ModifierKey {
+    public static let rightCommand: UInt32 = 54
+    public static let leftCommand: UInt32 = 55
+    public static let leftShift: UInt32 = 56
+    public static let rightShift: UInt32 = 60
+    public static let leftOption: UInt32 = 58
+    public static let rightOption: UInt32 = 61
+    public static let leftControl: UInt32 = 59
+    public static let rightControl: UInt32 = 62
+
+    /// De logische modifier die bij een modifier-keycode hoort, of nil als het geen
+    /// modifier-toets is (dan is het een gewone keycode-hotkey voor Carbon).
+    public static func logicalModifier(for keyCode: UInt32) -> KeyCombo.Modifiers? {
+        switch keyCode {
+        case leftCommand, rightCommand: return .command
+        case leftShift, rightShift: return .shift
+        case leftOption, rightOption: return .option
+        case leftControl, rightControl: return .control
+        default: return nil
+        }
+    }
+
+    /// Het device-specifieke CGEventFlags-bit per modifier-keycode. Links en rechts
+    /// hebben elk hun eigen bit (`IOLLEvent.h`, de `NX_DEVICE*`-maskers), zo is
+    /// rechter cmd van linker cmd te onderscheiden op een `.flagsChanged`. Nil als
+    /// het geen modifier-toets is.
+    public static func deviceMask(for keyCode: UInt32) -> UInt64? {
+        switch keyCode {
+        case leftControl: return 0x0000_0001    // NX_DEVICELCTLKEYMASK
+        case leftShift: return 0x0000_0002       // NX_DEVICELSHIFTKEYMASK
+        case rightShift: return 0x0000_0004      // NX_DEVICERSHIFTKEYMASK
+        case leftCommand: return 0x0000_0008     // NX_DEVICELCMDKEYMASK
+        case rightCommand: return 0x0000_0010    // NX_DEVICERCMDKEYMASK
+        case leftOption: return 0x0000_0020      // NX_DEVICELALTKEYMASK
+        case rightOption: return 0x0000_0040     // NX_DEVICERALTKEYMASK
+        case rightControl: return 0x0000_2000    // NX_DEVICERCTLKEYMASK
+        default: return nil
+        }
+    }
+
+    /// True als díe specifieke modifier-toets ingedrukt is in de gegeven
+    /// CGEventFlags. Op een `.flagsChanged` vertelt dit of de toets omlaag of omhoog
+    /// ging: het device-bit staat aan zolang de toets omlaag is, uit zodra hij los is.
+    public static func isKeyDown(keyCode: UInt32, deviceFlags: UInt64) -> Bool {
+        guard let mask = deviceMask(for: keyCode) else { return false }
+        return deviceFlags & mask != 0
+    }
+}
+
+// MARK: - Modifier-tik-detectie (CGEventTap-model)
+
+/// Eén tap-gebeurtenis, ontdaan van CoreGraphics zodat de tik-logica zonder een
+/// echte CGEventTap te testen is. De Carbon/CoreGraphics-laag vertaalt een ruwe
+/// `.flagsChanged` naar `.modifier(...)` en een gewone toetsdruk naar `.otherKey`.
+public enum TapEvent: Equatable, Sendable {
+    /// Een modifier-toets ging omlaag (`isDown`) of omhoog. `activeModifiers` zijn de
+    /// logische modifiers (⌘⇧⌥⌃) die ná deze verandering ingedrukt zijn.
+    case modifier(keyCode: UInt32, isDown: Bool, activeModifiers: KeyCombo.Modifiers)
+    /// Een gewone (niet-modifier) toets ging omlaag. Breekt een lopende tik af, want
+    /// modifier + gewone toets is een snelkoppeling, geen tik.
+    case otherKey
+}
+
+/// Detecteert een *tik* op een kale modifier en zegt welke toggle moet vuren. Puur —
+/// geen CoreGraphics, geen runloop — dus volledig getest. GEEN push-to-talk:
+/// vasthouden is nergens een modus, de app kent alleen toggles. Vasthouden wordt hier
+/// juist gedetecteerd om een toggle te ONDERDRUKKEN.
+///
+/// Een geldige tik is: modifier omlaag, dezelfde modifier weer omhoog, met (a) geen
+/// andere toets ertussen en (b) niet langer dan `maxHoldSeconds` vastgehouden. Zonder
+/// (a) wordt elke cmd-C of cmd-Tab een toggle; (b) vangt het geval dat de modifier
+/// lang wordt vastgehouden zonder dat er een andere toets bij komt.
+public final class ModifierTapDetector {
+    /// Eén modifier-only binding: welke actie vuurt bij een tik op welke
+    /// modifier-keycode, met welke extra modifiers erbij gehouden. Hands-free = tik
+    /// op rechter cmd (geen extra); auto-enter = tik op rechter cmd met shift vast.
+    public struct Binding: Equatable {
+        public let action: HotkeyAction
+        public let keyCode: UInt32
+        public let requiredModifiers: KeyCombo.Modifiers
+        public init(action: HotkeyAction, keyCode: UInt32, requiredModifiers: KeyCombo.Modifiers) {
+            self.action = action
+            self.keyCode = keyCode
+            self.requiredModifiers = requiredModifiers
+        }
+    }
+
+    private let bindings: [Binding]
+    private let maxHoldSeconds: Double
+    private var pending: Pending?
+
+    private struct Pending {
+        let keyCode: UInt32
+        let extraModifiers: KeyCombo.Modifiers
+        let downAt: Double
+    }
+
+    public init(bindings: [Binding], maxHoldSeconds: Double = 0.4) {
+        self.bindings = bindings
+        self.maxHoldSeconds = maxHoldSeconds
+    }
+
+    /// Verwerkt één tap-event op tijdstip `now` (seconden, monotoon). Geeft de actie
+    /// terug die moet togglen als dit event een geldige tik afmaakt, anders nil.
+    @discardableResult
+    public func process(_ event: TapEvent, now: Double) -> HotkeyAction? {
+        switch event {
+        case .otherKey:
+            // Er kwam een gewone toets bij: dit is een snelkoppeling, geen tik.
+            pending = nil
+            return nil
+
+        case let .modifier(keyCode, isDown, activeModifiers):
+            guard let ownModifier = ModifierKey.logicalModifier(for: keyCode) else {
+                return nil
+            }
+            if isDown {
+                // Nieuwe kandidaat-tik. De extra modifiers zijn wat er verder nog
+                // vastzit, los van de toets die net omlaag ging.
+                let extra = activeModifiers.subtracting(ownModifier)
+                pending = Pending(keyCode: keyCode, extraModifiers: extra, downAt: now)
+                return nil
+            }
+            // Omhoog: alleen de toets die als laatste omlaag ging telt als tik.
+            guard let p = pending, p.keyCode == keyCode else {
+                pending = nil
+                return nil
+            }
+            pending = nil
+            guard now - p.downAt <= maxHoldSeconds else { return nil }
+            return bindings.first {
+                $0.keyCode == keyCode && $0.requiredModifiers == p.extraModifiers
+            }?.action
         }
     }
 }
@@ -274,8 +436,48 @@ import IOKit.hid
 
 #if canImport(Carbon)
 import Carbon.HIToolbox
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 // MARK: - Carbon-laag (mensentest)
+
+/// De CGEventTap-callback voor `.flagsChanged` en `.keyDown`. Zet elk ruw event om in
+/// een `TapEvent` en geeft het aan de detector; de tap luistert alleen mee
+/// (`.listenOnly`), dus het event gaat onveranderd door. Draait op de main-runloop
+/// (de source hangt daaraan), dus `assumeIsolated` is veilig.
+#if canImport(CoreGraphics)
+private func pitchlabFlagsTapCallback(
+    _ proxy: CGEventTapProxy,
+    _ type: CGEventType,
+    _ event: CGEvent,
+    _ userData: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    if let userData {
+        let manager = Unmanaged<GlobalHotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+        // Het ruwe CGEvent hier vertalen naar een Sendable `TapEvent` — een CGEvent
+        // mag niet mee de main-actor closure in (Swift 6 data-race).
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            MainActor.assumeIsolated { manager.reenableTap() }
+        case .flagsChanged:
+            let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+            if ModifierKey.logicalModifier(for: keyCode) != nil {
+                let flags = event.flags
+                let isDown = ModifierKey.isKeyDown(keyCode: keyCode, deviceFlags: flags.rawValue)
+                let active = GlobalHotkeyManager.logicalModifiers(from: flags)
+                let tapEvent = TapEvent.modifier(keyCode: keyCode, isDown: isDown, activeModifiers: active)
+                MainActor.assumeIsolated { manager.handleTapEvent(tapEvent) }
+            }
+        case .keyDown:
+            MainActor.assumeIsolated { manager.handleTapEvent(.otherKey) }
+        default:
+            break
+        }
+    }
+    return Unmanaged.passUnretained(event)
+}
+#endif
 
 /// De C-event-handler die Carbon aanroept bij een geregistreerde hotkey. Haalt de
 /// `EventHotKeyID` uit het event en dispatcht naar de manager. Carbon roept dit op
@@ -313,6 +515,14 @@ public final class GlobalHotkeyManager {
     private var refs: [HotkeyAction: EventHotKeyRef] = [:]
     private var handlerRef: EventHandlerRef?
 
+    /// De tik-detector voor modifier-only combo's (rechter cmd), en de CGEventTap die
+    /// hem voedt. Alleen levend zodra er minstens één modifier-only binding is.
+    private var detector: ModifierTapDetector?
+    #if canImport(CoreGraphics)
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    #endif
+
     /// Vier tekens als handtekening voor de hotkey-registratie ("plsk").
     private let signature: OSType = 0x706C_736B
 
@@ -331,8 +541,9 @@ public final class GlobalHotkeyManager {
         store.status().statusItemTitle
     }
 
-    /// Vraagt de permissie op en registreert beide hotkeys. Geeft false terug (en
-    /// zet `permissionNotice`) als Input Monitoring ontbreekt.
+    /// Vraagt de permissie op en registreert beide hotkeys. Gewone keycode-combo's
+    /// gaan via Carbon, modifier-only combo's (rechter cmd) via de CGEventTap. Geeft
+    /// false terug (en zet `permissionNotice`) als Input Monitoring ontbreekt.
     @discardableResult
     public func start() -> Bool {
         guard InputMonitoring.isGranted() else {
@@ -341,26 +552,41 @@ public final class GlobalHotkeyManager {
         }
         permissionNotice = nil
         installHandlerIfNeeded()
-        for action in HotkeyAction.allCases {
+        for action in HotkeyAction.allCases where !store.combo(for: action).isModifierOnly {
             register(action)
         }
+        installEventTapIfNeeded()
         return true
     }
 
-    /// Herdefinieert de sneltoets voor een actie, bewaart hem en registreert bij
-    /// een levende handler meteen opnieuw.
+    /// Herdefinieert de sneltoets voor een actie, bewaart hem en registreert opnieuw
+    /// zodra de laag leeft. De combo kan van soort veranderen — een gewone keycode
+    /// wordt modifier-only of andersom — dus beide paden worden bijgewerkt.
     public func rebind(_ action: HotkeyAction, to combo: KeyCombo) {
         store.setCombo(combo, for: action)
-        if handlerRef != nil {
+        unregister(action)
+        if combo.isModifierOnly {
+            installEventTapIfNeeded()
+        } else if handlerRef != nil {
             register(action)
         }
     }
 
-    /// Verwerkt een toetsdruk: wissel de toggle en meld de nieuwe stand.
+    /// Verwerkt een Carbon-toetsdruk: wissel de toggle en meld de nieuwe stand.
     func handleHotkey(id: UInt32) {
         guard let action = HotkeyAction(hotkeyID: id) else { return }
         let now = store.toggle(action)
         onToggle?(action, now)
+    }
+
+    /// De modifier-only bindings uit de store, voor de detector.
+    private func modifierBindings() -> [ModifierTapDetector.Binding] {
+        HotkeyAction.allCases.compactMap { action in
+            let combo = store.combo(for: action)
+            guard combo.isModifierOnly else { return nil }
+            return ModifierTapDetector.Binding(
+                action: action, keyCode: combo.keyCode, requiredModifiers: combo.modifiers)
+        }
     }
 
     private func installHandlerIfNeeded() {
@@ -401,5 +627,60 @@ public final class GlobalHotkeyManager {
             refs[action] = nil
         }
     }
+
+    #if canImport(CoreGraphics)
+    /// De logische modifiers (⌘⇧⌥⌃) die ná deze flags ingedrukt zijn, los van welke
+    /// toets links of rechts zat. `nonisolated` zodat de nonisolated tap-callback hem
+    /// synchroon kan gebruiken bij het vertalen van een ruw CGEvent.
+    nonisolated static func logicalModifiers(from flags: CGEventFlags) -> KeyCombo.Modifiers {
+        var m: KeyCombo.Modifiers = []
+        if flags.contains(.maskCommand) { m.insert(.command) }
+        if flags.contains(.maskShift) { m.insert(.shift) }
+        if flags.contains(.maskAlternate) { m.insert(.option) }
+        if flags.contains(.maskControl) { m.insert(.control) }
+        return m
+    }
+
+    /// Bouwt de detector uit de store en zet één CGEventTap op zodra er een
+    /// modifier-only binding is. De tap luistert alleen mee; hij consumeert geen
+    /// events. Herbouwt de detector bij elke aanroep, maar maakt de mach-port maar
+    /// één keer.
+    private func installEventTapIfNeeded() {
+        let bindings = modifierBindings()
+        detector = ModifierTapDetector(bindings: bindings)
+        guard !bindings.isEmpty, eventTap == nil else { return }
+
+        let mask = (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
+            | (CGEventMask(1) << CGEventType.keyDown.rawValue)
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: mask,
+            callback: pitchlabFlagsTapCallback,
+            userInfo: userData) else { return }
+        eventTap = tap
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    /// Verwerkt een vertaald tap-event: laat de detector beslissen en toggelt bij een
+    /// geldige tik. Het ruwe CGEvent is al in de callback tot een `TapEvent` gemaakt.
+    func handleTapEvent(_ tapEvent: TapEvent) {
+        if let action = detector?.process(tapEvent, now: ProcessInfo.processInfo.systemUptime) {
+            let now = store.toggle(action)
+            onToggle?(action, now)
+        }
+    }
+
+    /// Zet de tap weer aan nadat het systeem hem heeft uitgeschakeld (timeout of te
+    /// veel invoer).
+    func reenableTap() {
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+    }
+    #endif
 }
 #endif
