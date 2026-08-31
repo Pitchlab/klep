@@ -28,17 +28,29 @@ import Testing
         #expect(symbols.count == 3)
     }
 
-    // MARK: - Hotkeys
+    // MARK: - Hotkey-toggles
 
-    @Test func hotkeyLineJoinsActionAndKeys() {
-        let binding = HotkeyBinding(action: "Dicteren (push-to-talk)", keys: "⌥Space")
-        #expect(binding.menuLine == "Dicteren (push-to-talk): ⌥Space")
+    @Test func toggleRowTitleShowsNameWithShortcutHint() {
+        let row = HotkeyToggleRow(
+            action: .handsFree, title: "Hands-free", isOn: false, shortcut: "⌃⌥H")
+        #expect(row.menuTitle == "Hands-free  ⌃⌥H")
     }
 
-    @Test func defaultHotkeysAreShown() {
-        let lines = HotkeyBinding.defaults.map(\.menuLine)
-        #expect(lines.contains("Dicteren (push-to-talk): ⌥Space"))
-        #expect(lines.contains("Dicteren aan/uit: ⌥⇧Space"))
+    @Test func toggleRowsComeFromTheStoreNotAHardcodedList() {
+        let rows = hotkeyToggleRows(store: HotkeysTestSupport.makeStore())
+        #expect(rows.map(\.action) == [.handsFree, .autoEnter])
+        #expect(rows.map(\.title) == ["Hands-free", "Auto-enter"])
+        // De ingestelde sneltoetsen uit de store, niet de vroegere push-to-talk.
+        #expect(rows.map(\.shortcut) == ["⌃⌥H", "⌃⌥E"])
+        #expect(!rows.contains(where: { $0.shortcut.contains("Space") }))
+    }
+
+    @Test func toggleRowReflectsTheStoredOnOffState() {
+        let store = HotkeysTestSupport.makeStore()
+        store.setOn(true, for: .handsFree)
+        let rows = hotkeyToggleRows(store: store)
+        #expect(rows[0].isOn == true)
+        #expect(rows[1].isOn == false)
     }
 
     // MARK: - Menu-model
@@ -53,15 +65,17 @@ import Testing
         #expect(model.microphoneLine == "Microfoon: (geen)")
     }
 
-    @Test func headerShowsStateMicrophoneAndHotkeys() {
+    @Test func headerShowsStateAndMicrophoneWithoutHotkeyLines() {
         let model = MenuModel(
             state: .listening,
-            activeMicrophone: "Ingebouwde microfoon",
-            hotkeys: HotkeyBinding.defaults)
+            activeMicrophone: "Ingebouwde microfoon")
         let header = model.headerLines()
         #expect(header.first == "Status: luistert…")
         #expect(header.contains("Microfoon: Ingebouwde microfoon"))
-        #expect(header.contains("Dicteren (push-to-talk): ⌥Space"))
+        // De hotkeys staan nu als klikbare toggles onder de header, niet als tekst
+        // erin — en de push-to-talk-regel is weg.
+        #expect(!header.contains(where: { $0.contains("push-to-talk") }))
+        #expect(!header.contains(where: { $0.contains("Space") }))
     }
 
     @Test func headerShowsFallbackNoticeWhenPresent() {
