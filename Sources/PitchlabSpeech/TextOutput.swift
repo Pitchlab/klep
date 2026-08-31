@@ -53,12 +53,22 @@ public enum TextOutputError: Error, CustomStringConvertible, Equatable {
 
 /// De toetsaanslag-laag, achter een protocol zodat de invoeg-route te testen is
 /// zonder echte events te posten (Accessibility/TCC — rules-of-engagement §2).
-public protocol KeystrokeInserter {
+/// `Sendable` zodat `TextOutput` (en de `TextOutputSink` erboven) over actorgrenzen
+/// mag reizen: de hands-free-keten draait in een actor.
+public protocol KeystrokeInserter: Sendable {
     /// True zodra het proces Accessibility-toestemming heeft.
     var isAuthorized: Bool { get }
     /// Voegt `text` in bij de cursor van het venster met focus. Gooit
     /// `TextOutputError.accessibilityNotAuthorized` als de toestemming ontbreekt.
     func insert(_ text: String) throws
+    /// Stuurt een Return bij de cursor (auto-enter na een afgeronde uiting).
+    func insertReturn() throws
+}
+
+public extension KeystrokeInserter {
+    /// Standaard-Return: een newline via `insert`. De echte CGEvent-route overschrijft
+    /// dit met een Return-keycode zodat een chatvenster de invoer verstuurt.
+    func insertReturn() throws { try insert("\n") }
 }
 
 /// Waarheen het transcript gaat. Beide tegelijk toegestaan.
@@ -78,9 +88,9 @@ public struct TextDestinations: OptionSet, Sendable {
 /// af van Accessibility en zit achter een injecteerbare `KeystrokeInserter`; de
 /// stdout-route zit achter een injecteerbare schrijf-closure. Zo is `emit` te
 /// testen zonder systeemtoestemming.
-public struct TextOutput {
+public struct TextOutput: Sendable {
     private let inserter: KeystrokeInserter
-    private let writeStandardOutput: (String) -> Void
+    private let writeStandardOutput: @Sendable (String) -> Void
 
     /// - Parameters:
     ///   - inserter: de toetsaanslag-laag. Standaard de echte CGEvent-route.
@@ -89,7 +99,7 @@ public struct TextOutput {
     ///     aanroeper bepaalt de opmaak).
     public init(
         inserter: KeystrokeInserter = CGEventKeystrokeInserter(),
-        writeStandardOutput: @escaping (String) -> Void = { text in
+        writeStandardOutput: @escaping @Sendable (String) -> Void = { text in
             FileHandle.standardOutput.write(Data(text.utf8))
         }
     ) {
@@ -102,15 +112,19 @@ public struct TextOutput {
     /// ontbreekt, is de tekst dus al op stdout geschreven vóór de fout. De
     /// cursor-route gooit `TextOutputError.accessibilityNotAuthorized` in plaats
     /// van stil te falen.
-    public func emit(_ text: String, to destinations: TextDestinations = .both) throws {
+    public func emit(
+        _ text: String, to destinations: TextDestinations = .both, pressReturn: Bool = false
+    ) throws {
         if destinations.contains(.standardOutput) {
             writeStandardOutput(text)
+            if pressReturn { writeStandardOutput("\n") }
         }
         if destinations.contains(.cursor) {
             guard inserter.isAuthorized else {
                 throw TextOutputError.accessibilityNotAuthorized
             }
             try inserter.insert(text)
+            if pressReturn { try inserter.insertReturn() }
         }
     }
 }
@@ -144,6 +158,23 @@ public struct CGEventKeystrokeInserter: KeystrokeInserter {
         let utf16 = Array(text.utf16)
         down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
         up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+
+    /// Stuurt een echte Return: virtuele keycode 36 (kVK_Return), zodat een
+    /// chatvenster de zojuist ingevoegde uiting verstuurt (auto-enter).
+    public func insertReturn() throws {
+        guard isAuthorized else { throw TextOutputError.accessibilityNotAuthorized }
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+            throw TextOutputError.eventCreationFailed
+        }
+        guard
+            let down = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true),
+            let up = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)
+        else {
+            throw TextOutputError.eventCreationFailed
+        }
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }
