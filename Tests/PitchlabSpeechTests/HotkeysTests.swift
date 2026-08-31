@@ -135,6 +135,26 @@ import Testing
         #expect(status.statusItemTitle == "HF○ AE●")
     }
 
+    @Test func statusSymbolsDistinguishAllFourCombos() {
+        let combos: [(Bool, Bool)] = [(false, false), (true, false), (false, true), (true, true)]
+        var seen = Set<[String]>()
+        for (hf, ae) in combos {
+            let names = HotkeyStatus(handsFree: hf, autoEnter: ae).statusSymbols().map(\.systemName)
+            #expect(names.count == 2)
+            seen.insert(names)
+        }
+        // Elk van de vier standen levert een unieke symbool-combinatie op.
+        #expect(seen.count == 4)
+    }
+
+    @Test func statusSymbolsCarryAccessibilityLabels() {
+        let symbols = HotkeyStatus(handsFree: true, autoEnter: false).statusSymbols()
+        #expect(symbols.first?.accessibilityLabel == "Hands-free aan")
+        #expect(symbols.last?.accessibilityLabel == "Auto-enter uit")
+        #expect(HotkeyStatus(handsFree: true, autoEnter: false).accessibilityLabel
+            == "Hands-free aan, Auto-enter uit")
+    }
+
     @Test func statusMenuLinesSpellOutBothToggles() {
         let lines = HotkeyStatus(handsFree: true, autoEnter: false).menuLines()
         #expect(lines.contains("Hands-free: aan"))

@@ -258,18 +258,59 @@ public final class MenuBarController: NSObject {
         refresh()
     }
 
-    /// De statusbalk-titel die beide hotkey-standen samenvat, bv. "HF● AE○".
-    private var hotkeyStatusTitle: String { hotkeys.status().statusItemTitle }
+    /// Hoogte van de samengestelde statusbalk-glyph in punten; de menubalk schaalt
+    /// een template-`NSImage` naar zijn dikte, dit bepaalt de tekenresolutie.
+    private static let statusGlyphHeight: CGFloat = 18
 
-    /// Tekent icoon plus hotkey-standen op de statusbalk-knop. Beide toggles zijn
-    /// zo afleesbaar zonder het menu te openen (spec PL-704).
+    /// Tekent de staat plus beide hotkey-standen als één rij SF Symbols op de
+    /// statusbalk-knop, zonder tekstlabel — de vroegere "HF● AE○"-tekst is nu
+    /// `mic.fill`/`mic.slash` (hands-free) en `arrow.turn.down.left(.circle)`
+    /// (auto-enter), zie `HotkeyStatus.statusSymbols()` (PL-730). Beide toggles
+    /// blijven zo afleesbaar zonder het menu te openen (R3, spec PL-704). De hele
+    /// knop krijgt een VoiceOver-samenvatting via `accessibilityLabel`.
     private func drawStatusButton() {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(
-            systemSymbolName: model.state.symbolName,
-            accessibilityDescription: model.state.menuLabel)
-        button.imagePosition = .imageLeading
-        button.title = " " + hotkeyStatusTitle
+        let status = hotkeys.status()
+        var symbols: [(name: String, active: Bool, label: String)] = [
+            (model.state.symbolName, true, model.state.menuLabel)
+        ]
+        symbols += status.statusSymbols().map { ($0.systemName, $0.isActive, $0.accessibilityLabel) }
+
+        button.image = Self.composedStatusImage(from: symbols)
+        button.imagePosition = .imageOnly
+        button.title = ""
+        button.setAccessibilityLabel(status.accessibilityLabel)
+    }
+
+    /// Zet een rij symbolen om in één template-`NSImage`: elk symbool naast elkaar,
+    /// actieve vol en inactieve gedimd voor extra contrast. Template-rendering laat
+    /// de balk zelf tinten, zodat de glyph in licht en donker meekleurt. Een ontbrekend
+    /// SF Symbol wordt overgeslagen zodat de knop nooit leeg blijft.
+    private static func composedStatusImage(
+        from symbols: [(name: String, active: Bool, label: String)]
+    ) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: statusGlyphHeight, weight: .regular)
+        let images: [(NSImage, Bool)] = symbols.compactMap { spec in
+            guard let base = NSImage(systemSymbolName: spec.name, accessibilityDescription: spec.label),
+                  let img = base.withSymbolConfiguration(config) else { return nil }
+            return (img, spec.active)
+        }
+        let gap: CGFloat = 3
+        let width = images.reduce(0) { $0 + $1.0.size.width } + gap * CGFloat(max(images.count - 1, 0))
+        let height = images.map(\.0.size.height).max() ?? statusGlyphHeight
+        let canvas = NSImage(size: NSSize(width: max(width, 1), height: max(height, 1)))
+        canvas.lockFocus()
+        var x: CGFloat = 0
+        for (img, active) in images {
+            let y = (height - img.size.height) / 2
+            img.draw(
+                at: NSPoint(x: x, y: y), from: .zero,
+                operation: .sourceOver, fraction: active ? 1.0 : 0.35)
+            x += img.size.width + gap
+        }
+        canvas.unlockFocus()
+        canvas.isTemplate = true
+        return canvas
     }
 
     /// Hertekent na een hotkey-toggle, zodat de balk de nieuwe stand meteen toont.

@@ -228,10 +228,41 @@ public struct HotkeyStatus: Sendable, Equatable {
     }
 
     /// Compacte titel voor de statusbalk-knop: aangevinkt vol (●), uit hol (○),
-    /// bv. "HF● AE○".
+    /// bv. "HF● AE○". Sinds PL-730 tekent de statusbalk symbolen (zie
+    /// `statusSymbols()`); deze tekst blijft de VoiceOver-samenvatting én het anker
+    /// van `statusTitleShowsBothStatesAtAGlance`, zodat beide standen ook in woorden
+    /// afleesbaar blijven.
     public var statusItemTitle: String {
         "\(HotkeyAction.handsFree.badge)\(handsFree ? "●" : "○")"
             + " \(HotkeyAction.autoEnter.badge)\(autoEnter ? "●" : "○")"
+    }
+
+    /// De SF Symbols voor het statusitem, in tekenvolgorde: hands-free dan
+    /// auto-enter. Ontwerpkeuze (R3): elke toggle wisselt van *glyph* i.p.v. alleen
+    /// van vulling, want alleen dimmen leest te subtiel op menubalk-formaat. Hands-
+    /// free gebruikt `mic.fill` (aan) tegenover `mic.slash` (uit); auto-enter gebruikt
+    /// `arrow.turn.down.left` (aan) tegenover `arrow.turn.down.left.circle` (uit).
+    /// Zo zijn de vier combinaties (aan/aan, aan/uit, uit/aan, uit/uit) op het oog
+    /// alle vier onderscheidbaar zonder het menu te openen. De AppKit-laag tekent het
+    /// actieve symbool vol en het inactieve gedimd als extra contrast, en hangt
+    /// `accessibilityLabel` per symbool voor VoiceOver.
+    public func statusSymbols() -> [StatusSymbol] {
+        [
+            StatusSymbol(
+                systemName: handsFree ? "mic.fill" : "mic.slash",
+                isActive: handsFree,
+                accessibilityLabel: "\(HotkeyAction.handsFree.title) \(handsFree ? "aan" : "uit")"),
+            StatusSymbol(
+                systemName: autoEnter ? "arrow.turn.down.left" : "arrow.turn.down.left.circle",
+                isActive: autoEnter,
+                accessibilityLabel: "\(HotkeyAction.autoEnter.title) \(autoEnter ? "aan" : "uit")"),
+        ]
+    }
+
+    /// De samengestelde VoiceOver-tekst voor de hele statusbalk-knop, bv.
+    /// "Hands-free aan, Auto-enter uit".
+    public var accessibilityLabel: String {
+        statusSymbols().map(\.accessibilityLabel).joined(separator: ", ")
     }
 
     /// Menuregel per toggle, met de stand voluit geschreven.
@@ -240,6 +271,21 @@ public struct HotkeyStatus: Sendable, Equatable {
             "\(HotkeyAction.handsFree.title): \(handsFree ? "aan" : "uit")",
             "\(HotkeyAction.autoEnter.title): \(autoEnter ? "aan" : "uit")",
         ]
+    }
+}
+
+/// Eén symbool voor het statusitem: de SF Symbol-naam, of de stand actief is (voor
+/// vol vs gedimd tekenen) en het VoiceOver-label. Puur, zodat de keuze getest kan
+/// worden zonder AppKit-runloop; de AppKit-laag zet dit om naar een template-`NSImage`.
+public struct StatusSymbol: Sendable, Equatable {
+    public let systemName: String
+    public let isActive: Bool
+    public let accessibilityLabel: String
+
+    public init(systemName: String, isActive: Bool, accessibilityLabel: String) {
+        self.systemName = systemName
+        self.isActive = isActive
+        self.accessibilityLabel = accessibilityLabel
     }
 }
 
