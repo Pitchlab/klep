@@ -14,6 +14,38 @@ enum Fixtures {
     /// in de Command Line Tools, dus geen externe dependency.
     static let dutchUtterance: URL = generate()
 
+    /// Dezelfde NL-fixture op het vaste pad dat de CLI-gate leest,
+    /// `Tests/Fixtures/nl_short.wav`. Wordt hier met `say` gegenereerd (ROE §5:
+    /// audio nooit committen — de map is gitignored) en met `#filePath` gelokaliseerd
+    /// zodat de working directory niet uitmaakt. `swift test` draait in de gate vóór
+    /// de CLI-stap, dus het bestand bestaat wanneer `pitchlab-speech --once` het leest.
+    static let shortFixtureURL: URL = generateShort()
+
+    /// De map `Tests/Fixtures/`, afgeleid van dit bestand (`Tests/PitchlabSpeechTests/`).
+    static var fixturesDirectory: URL {
+        URL(fileURLWithPath: #filePath)      // …/Tests/PitchlabSpeechTests/Fixtures.swift
+            .deletingLastPathComponent()     // …/Tests/PitchlabSpeechTests
+            .deletingLastPathComponent()     // …/Tests
+            .appendingPathComponent("Fixtures", isDirectory: true)
+    }
+
+    private static func generateShort() -> URL {
+        let dir = fixturesDirectory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let wav = dir.appendingPathComponent("nl_short.wav")
+        if FileManager.default.fileExists(atPath: wav.path) { return wav }
+
+        let aiff = dir.appendingPathComponent("nl_short.aiff")
+        run("/usr/bin/say", ["-v", "Xander", "-o", aiff.path, sentence])
+        run("/usr/bin/afconvert", ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", aiff.path, wav.path])
+        try? FileManager.default.removeItem(at: aiff)
+
+        guard FileManager.default.fileExists(atPath: wav.path) else {
+            fatalError("korte fixture-generatie faalde: \(wav.path) niet aangemaakt")
+        }
+        return wav
+    }
+
     private static func generate() -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("pitchlab-speech-fixtures", isDirectory: true)
