@@ -45,7 +45,8 @@ let package = Package(
         .testTarget(
             name: "PitchlabSpeechTests",
             dependencies: ["PitchlabSpeech"],
-            resources: [.copy("Resources/fixture.wav")],
+            // Geen resources: de NL-fixture wordt in de test gegenereerd met
+            // `say`+`afconvert` (zie Fixtures.swift), niet gecommit (ROE §5).
             swiftSettings: [.unsafeFlags(["-F", frameworksPath])],
             linkerSettings: [.unsafeFlags(["-F", frameworksPath, "-Xlinker", "-rpath", "-Xlinker", frameworksPath])]
         ),

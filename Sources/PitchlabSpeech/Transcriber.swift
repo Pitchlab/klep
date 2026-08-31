@@ -19,17 +19,24 @@ public actor Transcriber {
 
     private var asr: AsrManager?
     private var decoderLayers = 0
+    private var loads = 0
 
     public init() {}
 
     /// Het model is geladen en warm.
     public var isWarm: Bool { asr != nil }
 
+    /// Hoe vaak het model daadwerkelijk geladen is. Blijft 1 zodra het warm is:
+    /// bewijs dat `warmUp` idempotent is en opeenvolgende uitingen het model
+    /// niet herladen.
+    public var loadCount: Int { loads }
+
     /// Laadt het Parakeet-model eenmalig en houdt het warm. Idempotent: een
     /// tweede aanroep is een no-op. De eerste aanroep downloadt het model naar
     /// de FluidAudio-cache als het nog niet op schijf staat.
     public func warmUp() async throws {
         guard asr == nil else { return }
+        loads += 1
         let models = try await AsrModels.downloadAndLoad(version: .v3)
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)

@@ -21,10 +21,13 @@ import Testing
         try await transcriber.warmUp()
         #expect(await transcriber.isWarm)
 
-        // Tweede uiting hergebruikt het warme model; beide leveren dezelfde tekst.
+        // Twee uitingen op het warme model. Beide leveren dezelfde tekst, en het
+        // model is exact één keer geladen — een reload-per-uiting zou óók dezelfde
+        // tekst geven, dus `loadCount` bewijst het warm-houden dat `isWarm` niet kan.
         let first = try await transcriber.transcribe(Fixtures.dutchUtterance)
         let second = try await transcriber.transcribe(Fixtures.dutchUtterance)
         #expect(!first.isEmpty)
         #expect(first == second)
+        #expect(await transcriber.loadCount == 1)
     }
 }
