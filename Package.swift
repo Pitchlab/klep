@@ -29,6 +29,8 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "PitchlabSpeech", targets: ["PitchlabSpeech"]),
+        // Menubalk-binary die `scripts/build-app.sh` tot PitchlabSpeech.app verpakt.
+        .executable(name: "PitchlabSpeechApp", targets: ["PitchlabSpeechApp"]),
     ],
     dependencies: [
         // Parakeet TDT 0.6b v3 via CoreML/Neural Engine. Versie zoals bewezen in
@@ -41,6 +43,12 @@ let package = Package(
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
+        ),
+        // Dunne instap: roept `runMenuBarApp()` uit de library. De AppKit-runloop
+        // en het statusitem tonen is een mensentest; de logica staat in de library.
+        .executableTarget(
+            name: "PitchlabSpeechApp",
+            dependencies: ["PitchlabSpeech"]
         ),
         .testTarget(
             name: "PitchlabSpeechTests",
