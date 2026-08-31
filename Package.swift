@@ -30,11 +30,22 @@ let package = Package(
     products: [
         .library(name: "PitchlabSpeech", targets: ["PitchlabSpeech"]),
     ],
+    dependencies: [
+        // Parakeet TDT 0.6b v3 via CoreML/Neural Engine. Versie zoals bewezen in
+        // spike PL-715 (0.12.4 -> resolvet naar 0.15.6), geen tweede aanroep.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
+    ],
     targets: [
-        .target(name: "PitchlabSpeech"),
+        .target(
+            name: "PitchlabSpeech",
+            dependencies: [
+                .product(name: "FluidAudio", package: "FluidAudio"),
+            ]
+        ),
         .testTarget(
             name: "PitchlabSpeechTests",
             dependencies: ["PitchlabSpeech"],
+            resources: [.copy("Resources/fixture.wav")],
             swiftSettings: [.unsafeFlags(["-F", frameworksPath])],
             linkerSettings: [.unsafeFlags(["-F", frameworksPath, "-Xlinker", "-rpath", "-Xlinker", frameworksPath])]
         ),
