@@ -65,6 +65,9 @@ public actor HandsFreeController {
     private let transcriber: UtteranceTranscribing
     private let sink: TranscriptEmitting
     private let indicator: ListeningIndicating
+    /// Toestemmingslaag: vóór de opname gecontroleerd zodat de app nooit stil op een
+    /// geweigerde microfoon draait. Injecteerbaar zodat de suite hem test zonder TCC.
+    private let permission: MicrophonePermission
     /// Live gelezen zodat auto-enter mid-sessie aan/uit kan zonder herstart.
     private let autoEnter: @Sendable () -> Bool
 
@@ -80,12 +83,14 @@ public actor HandsFreeController {
         transcriber: UtteranceTranscribing,
         sink: TranscriptEmitting,
         indicator: ListeningIndicating,
+        permission: MicrophonePermission = AVCaptureMicrophonePermission(),
         autoEnter: @escaping @Sendable () -> Bool
     ) {
         self.audio = audio
         self.transcriber = transcriber
         self.sink = sink
         self.indicator = indicator
+        self.permission = permission
         self.autoEnter = autoEnter
     }
 
@@ -94,9 +99,21 @@ public actor HandsFreeController {
     }
 
     /// Draai de keten tot de audiostroom sluit (hands-free uit → `stop()`), of tot
-    /// de bron niet kon starten. Warmt het model één keer vóór de eerste uiting, dus
-    /// niet per uiting. Toont de indicator zolang het loopt en verbergt hem daarna.
-    public func run(device: DeviceInfo?) async {
+    /// de bron niet kon starten. Vraagt eerst microfoontoestemming: bij `.notDetermined`
+    /// toont macOS de prompt, bij een weigering start de keten niet — geen indicator,
+    /// geen opname — en landt de reden in het menu via `onError` (dezelfde route als
+    /// een uitvoerfout). Geeft `false` terug bij een weigering zodat de AppKit-laag de
+    /// toggle kan terugzetten; `true` als de keten daadwerkelijk startte. Warmt het
+    /// model één keer vóór de eerste uiting. Toont de indicator zolang het loopt.
+    @discardableResult
+    public func run(device: DeviceInfo?) async -> Bool {
+        switch await permission.ensureAccess() {
+        case .granted:
+            break
+        case .denied(let reason):
+            report(reason)
+            return false
+        }
         indicator.show()
         isListening = true
         defer {
@@ -117,6 +134,7 @@ public actor HandsFreeController {
         } catch {
             report(error)
         }
+        return true
     }
 
     /// Vraag de audiobron te stoppen; dat sluit de stroom en laat `run` terugkeren.
@@ -135,7 +153,10 @@ public actor HandsFreeController {
     }
 
     private func report(_ error: Error) {
-        let message = String(describing: error)
+        report(String(describing: error))
+    }
+
+    private func report(_ message: String) {
         lastError = message
         onError?(message)
     }
