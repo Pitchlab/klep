@@ -112,6 +112,78 @@ enum DiagnosticsTestSupport {
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 
+    /// De losse JSONL-regels die het logbestand voor deze gebeurtenissen schrijft — elk
+    /// een machine-leesbaar record.
+    static func recordLines(_ events: [DiagnosticEvent], maxBytes: Int = 512_000) -> [String] {
+        writeAndRead(events, maxBytes: maxBytes)
+            .split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    /// Of een regel als JSON parseert. Zo bewijst de test de JSONL-vorm zonder zelf
+    /// Foundation te importeren.
+    static func isJSON(_ line: String) -> Bool {
+        guard let data = line.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
+    /// Een strikt gedecodeerd transcript-record. Decodeert alleen als `characters` en
+    /// `elapsed_ms` echte getallen zijn — een string zou gooien. `containsSecret` bewijst
+    /// dat de record-vorm geen transcript-inhoud kan lekken.
+    struct DecodedTranscribed {
+        let decoded: Bool
+        let ts: String
+        let level: String
+        let event: String
+        let characters: Int
+        let elapsedMs: Int
+        let containsSecret: Bool
+    }
+
+    static func decodeTranscribed(characters: Int, elapsedMs: Int, secret: String) -> DecodedTranscribed {
+        struct Row: Decodable {
+            let ts: String
+            let level: String
+            let event: String
+            let characters: Int
+            let elapsed_ms: Int
+        }
+        let line = recordLines([.transcribed(characters: characters, elapsedMs: elapsedMs)]).first ?? ""
+        guard let data = line.data(using: .utf8),
+            let row = try? JSONDecoder().decode(Row.self, from: data)
+        else {
+            return DecodedTranscribed(
+                decoded: false, ts: "", level: "", event: "", characters: -1, elapsedMs: -1,
+                containsSecret: false)
+        }
+        return DecodedTranscribed(
+            decoded: true, ts: row.ts, level: row.level, event: row.event,
+            characters: row.characters, elapsedMs: row.elapsed_ms, containsSecret: line.contains(secret))
+    }
+
+    /// Een strikt gedecodeerd output-record. Decodeert alleen als `succeeded` een echte
+    /// boolean is — een getal of string zou gooien.
+    struct DecodedOutput {
+        let decoded: Bool
+        let event: String
+        let route: String
+        let succeeded: Bool
+    }
+
+    static func decodeOutput(route: String, succeeded: Bool) -> DecodedOutput {
+        struct Row: Decodable {
+            let event: String
+            let route: String
+            let succeeded: Bool
+        }
+        let line = recordLines([.output(route: route, succeeded: succeeded)]).first ?? ""
+        guard let data = line.data(using: .utf8),
+            let row = try? JSONDecoder().decode(Row.self, from: data)
+        else {
+            return DecodedOutput(decoded: false, event: "", route: "", succeeded: false)
+        }
+        return DecodedOutput(decoded: true, event: row.event, route: row.route, succeeded: row.succeeded)
+    }
+
     /// Wat na een rotatie op schijf staat: het aantal regels in het huidige bestand en of
     /// het geroteerde `.1`-bestand bestaat.
     struct RotationResult {

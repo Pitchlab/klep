@@ -37,11 +37,31 @@ import Testing
         #expect(DiagnosticEvent.failure(origin: "tekstuitvoer", message: "x").level == .error)
     }
 
-    /// GEEN inhoud: de transcript-gebeurtenis draagt alleen aantal tekens en tijd, de
-    /// tekst zelf staat er niet in — de case kan hem niet dragen.
+    /// GEEN inhoud, ook in de JSON-vorm: de transcript-gebeurtenis draagt alleen aantal
+    /// tekens en tijd — als getal — en de tekst zelf staat er niet in; de case kan hem niet
+    /// dragen. De privacyregel geldt op het record, niet alleen op de zin.
     @Test func transcriptEventLogsLengthAndTimeNeverContent() {
-        let line = DiagnosticEvent.transcribed(characters: 10, elapsedMs: 50).line
-        #expect(line == "transcript 10 tekens in 50 ms")
+        #expect(DiagnosticEvent.transcribed(characters: 10, elapsedMs: 50).line == "transcript 10 tekens in 50 ms")
+        let record = DiagnosticsTestSupport.decodeTranscribed(
+            characters: 10, elapsedMs: 50, secret: "geheime woorden")
+        #expect(record.decoded)
+        #expect(record.event == "transcribed")
+        #expect(record.characters == 10)
+        #expect(record.elapsedMs == 50)
+        #expect(!record.containsSecret)
+    }
+
+    /// De machine-namen zijn het contract en veranderen niet met de zin.
+    @Test func eventNamesAreStable() {
+        #expect(DiagnosticEvent.handsFreeOn(reason: "x").name == "hands_free_on")
+        #expect(DiagnosticEvent.handsFreeOff(reason: "x").name == "hands_free_off")
+        #expect(DiagnosticEvent.handsFreeRestored(on: true).name == "hands_free_restored")
+        #expect(DiagnosticEvent.deviceSelected(name: nil).name == "device_selected")
+        #expect(DiagnosticEvent.permission(kind: "m", status: "s").name == "permission")
+        #expect(DiagnosticEvent.utteranceDetected(durationMs: 1).name == "utterance_detected")
+        #expect(DiagnosticEvent.transcribed(characters: 1, elapsedMs: 1).name == "transcribed")
+        #expect(DiagnosticEvent.output(route: "r", succeeded: true).name == "output")
+        #expect(DiagnosticEvent.failure(origin: "o", message: "m").name == "failure")
     }
 
     // MARK: - Diagnostiek-schakelaar
@@ -63,16 +83,45 @@ import Testing
 
     // MARK: - Logbestand
 
-    /// Het bestand krijgt per gebeurtenis één regel met de ernst en de tekst.
-    @Test func fileWritesOneLinePerEvent() {
-        let contents = DiagnosticsTestSupport.writeAndRead([
+    /// Het bestand is JSONL: per gebeurtenis één regel die als JSON parseert, met de
+    /// stabiele `event`-naam, `level`, de getypeerde velden en `msg` met de zin.
+    @Test func fileWritesOneJSONRecordPerEvent() {
+        let lines = DiagnosticsTestSupport.recordLines([
             .handsFreeOn(reason: "menu"),
             .failure(origin: "tekstuitvoer", message: "geen toegang"),
         ])
-        #expect(contents.contains("INFO hands-free aan (menu)"))
-        #expect(contents.contains("ERROR fout in tekstuitvoer: geen toegang"))
-        let lineCount = contents.split(separator: "\n", omittingEmptySubsequences: true).count
-        #expect(lineCount == 2)
+        #expect(lines.count == 2)
+        #expect(lines.allSatisfy(DiagnosticsTestSupport.isJSON))
+        #expect(lines[0].contains("\"event\":\"hands_free_on\""))
+        #expect(lines[0].contains("\"reason\":\"menu\""))
+        #expect(lines[0].contains("\"level\":\"INFO\""))
+        #expect(lines[0].contains("\"msg\":\"hands-free aan (menu)\""))
+        #expect(lines[1].contains("\"event\":\"failure\""))
+        #expect(lines[1].contains("\"origin\":\"tekstuitvoer\""))
+        #expect(lines[1].contains("\"message\":\"geen toegang\""))
+        #expect(lines[1].contains("\"level\":\"ERROR\""))
+    }
+
+    /// Getallen staan als getal in het record, niet als string: een strikte decode van
+    /// `characters` en `elapsed_ms` slaagt (een string zou gooien).
+    @Test func numericFieldsAreTypedNumbers() {
+        let record = DiagnosticsTestSupport.decodeTranscribed(characters: 10, elapsedMs: 50, secret: "x")
+        #expect(record.decoded)
+        #expect(record.characters == 10)
+        #expect(record.elapsedMs == 50)
+    }
+
+    /// `succeeded` staat als boolean in het record: een strikte decode naar `Bool` slaagt
+    /// voor beide standen.
+    @Test func booleanFieldIsTypedBoolean() {
+        let ok = DiagnosticsTestSupport.decodeOutput(route: "cursor+stdout", succeeded: true)
+        #expect(ok.decoded)
+        #expect(ok.event == "output")
+        #expect(ok.route == "cursor+stdout")
+        #expect(ok.succeeded)
+        let failed = DiagnosticsTestSupport.decodeOutput(route: "cursor+stdout", succeeded: false)
+        #expect(failed.decoded)
+        #expect(!failed.succeeded)
     }
 
     /// Bij overschrijding van `maxBytes` roteert het bestand één keer: het huidige bestand
