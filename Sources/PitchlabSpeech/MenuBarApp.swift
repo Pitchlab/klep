@@ -211,6 +211,12 @@ public final class MenuBarController: NSObject {
     /// kan geen schuifregelaar met een zichtbare waarde dragen (zie `MenuBarPanel.swift`).
     private let popover = NSPopover()
     private let panel = MenuBarPanelController()
+    /// Leest de drie permissiestatussen live (PL-729); cachet niets, zodat een omgezet
+    /// vinkje klopt zonder herstart.
+    private let permissionsProbe: PermissionsProbe
+    private let permissionsSection = PermissionsSectionView()
+    /// Of er nu een permissie ontbreekt; het statusitem toont dat dan zonder het menu.
+    private var permissionsMissing = false
     /// Aangeroepen als de hands-free-toggle via het paneel wisselt, met de nieuwe stand.
     /// De delegate hangt hier het starten/stoppen van de luister-keten aan, zodat de
     /// paneel-klik dezelfde keten start als de globale sneltoets (niet enkel een boolean).
@@ -220,13 +226,15 @@ public final class MenuBarController: NSObject {
         selector: MicrophoneSelector = MicrophoneSelector(),
         launchAgent: LaunchAgentManager,
         hotkeys: HotkeyStore = HotkeyStore(defaults: UserDefaults.standard),
-        listeningIndicator: ListeningIndicatorController? = nil
+        listeningIndicator: ListeningIndicatorController? = nil,
+        permissionsProbe: PermissionsProbe = PermissionsProbe()
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.selector = selector
         self.launchAgent = launchAgent
         self.hotkeys = hotkeys
         self.listeningIndicator = listeningIndicator
+        self.permissionsProbe = permissionsProbe
         self.model = ControllerState()
         super.init()
         configurePopover()
@@ -281,21 +289,56 @@ public final class MenuBarController: NSObject {
             }
         }
 
+        // De permissie-sectie (PL-729) opent zelf geen Systeeminstellingen; de knop hangt
+        // hier aan de open-actie zodat het echt openen een mensentest blijft (ROE §2).
+        permissionsSection.onOpenSettings = { [weak self] kind in
+            self?.openPrivacySettings(for: kind)
+        }
+        refreshPermissions()
+
         if let button = statusItem.button {
             button.target = self
             button.action = #selector(togglePanel(_:))
         }
     }
 
-    /// Opent of sluit het bedieningspaneel onder de statusitem-knop.
+    /// Opent of sluit het bedieningspaneel onder de statusitem-knop. Leest de
+    /// permissiestatus vers vóór het tonen, zodat een omgezet vinkje klopt zonder herstart.
     @objc private func togglePanel(_ sender: Any?) {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(sender)
         } else {
+            refreshPermissions()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    /// Opent het bedieningspaneel — gebruikt om de permissie-sectie bij de eerste start
+    /// aan te bieden (PL-729), wanneer het gat het grootst is.
+    public func openPanel() {
+        guard let button = statusItem.button, !popover.isShown else { return }
+        refreshPermissions()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Leest de drie permissiestatussen live en hertekent de sectie in het `permissionSlot`.
+    /// Onthoudt of er iets ontbreekt zodat het statusitem dat toont zonder het menu.
+    private func refreshPermissions() {
+        let model = permissionsProbe.snapshot()
+        permissionsMissing = model.anyMissing
+        permissionsSection.render(model, into: panel.permissionSlot)
+        drawStatusButton()
+    }
+
+    /// Opent het juiste Systeeminstellingen-paneel voor de permissie (mensentest; niet in
+    /// de suite aangeroepen). De URL en zijn twee kandidaat-varianten staan in
+    /// `PermissionKind.settingsURLString`.
+    private func openPrivacySettings(for kind: PermissionKind) {
+        guard let url = URL(string: kind.settingsURLString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// Hoogte van de samengestelde statusbalk-glyph in punten; de menubalk schaalt
@@ -315,6 +358,13 @@ public final class MenuBarController: NSObject {
             (model.state.symbolName, true, model.state.menuLabel)
         ]
         symbols += status.statusSymbols().map { ($0.systemName, $0.isActive, $0.accessibilityLabel) }
+        // Ontbrekende permissie zichtbaar zonder het paneel te openen: een waarschuwings-
+        // glyph vooraan (PL-729). Zo zag Erik de uitgezette Toegankelijkheid meteen.
+        if permissionsMissing {
+            symbols.insert(
+                ("exclamationmark.triangle.fill", true, "Er ontbreekt een permissie"),
+                at: 0)
+        }
 
         button.image = Self.composedStatusImage(from: symbols)
         button.imagePosition = .imageOnly
@@ -523,6 +573,15 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
         self.hotkeyManager = manager
+
+        // Bied de permissie-sectie aan bij de eerste start (PL-729): dan is het gat het
+        // grootst en staan de drie permissies meestal nog uit. Eén keer, daarna niet meer.
+        let launchedKey = "pitchlab-speech.hasLaunchedBefore"
+        let hasLaunchedBefore = UserDefaults.standard.bool(forKey: launchedKey)
+        if FirstRunGate.shouldOffer(hasLaunchedBefore: hasLaunchedBefore) {
+            UserDefaults.standard.set(true, forKey: launchedKey)
+            controller.openPanel()
+        }
     }
 
     /// Start of stop hands-free op basis van de nieuwe toggle-stand. `reason` is de

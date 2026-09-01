@@ -1,0 +1,277 @@
+/// De drie permissies die samen bepalen of de app iets doet, als één sectie in het
+/// menubalk-paneel (PL-729). Tot deze taak was het enige signaal een losse ⚠︎-regel in
+/// het menu; Erik zag een uitgezette Toegankelijkheid pas na drie uur zoeken.
+///
+/// Twee lagen, net als de rest van de app, zodat de logica zonder runloop te testen is:
+///  - Pure model-laag (`PermissionKind`, `PermissionItem`, `PermissionsModel`,
+///    `PermissionsProbe`, `FirstRunGate`): de teksten, de herstart-hint, de
+///    Systeeminstellingen-URL en de live status-afbeelding. Geen AppKit, geen echte TCC —
+///    getest in `PermissionsScreenTests`.
+///  - AppKit-laag (`PermissionsSectionView`), onder `#if canImport(AppKit)`: hangt de
+///    rijen in het publieke `permissionSlot` van `MenuBarPanelController`. Wat je tekent
+///    en het echt openen van een Systeeminstellingen-paneel zijn mensentesten (ROE §2).
+
+import Foundation
+
+// MARK: - Permissiesoort
+
+/// De drie permissies, in de vaste volgorde waarin de sectie ze toont.
+public enum PermissionKind: String, CaseIterable, Sendable, Equatable {
+    case microphone
+    case accessibility
+    case inputMonitoring
+
+    /// De naam zoals macOS de permissie noemt, ook de rij-titel.
+    public var title: String {
+        switch self {
+        case .microphone: return "Microfoon"
+        case .accessibility: return "Toegankelijkheid"
+        case .inputMonitoring: return "Invoerbewaking"
+        }
+    }
+
+    /// Wat er zonder deze permissie wel en niet werkt — het gevaar is dat de app stil faalt.
+    public var effect: String {
+        switch self {
+        case .microphone: return "Zonder microfoontoegang neemt de app stilte op zonder te klagen: geen fout, geen transcript."
+        case .accessibility: return "Zonder Toegankelijkheid lukt transcriberen wel, maar typen bij de cursor niet."
+        case .inputMonitoring: return "Zonder Invoerbewaking vuren de globale sneltoetsen niet."
+        }
+    }
+
+    /// Of de app opnieuw gestart moet worden nadat je de permissie hebt gegeven. Eerlijk
+    /// per permissie: Invoerbewaking vraagt het (`InputMonitoring.missingNotice` zegt het
+    /// al), Toegankelijkheid ook (de al draaiende `AXIsProcessTrusted`-client pakt de
+    /// nieuwe trust pas na een herstart op), microfoon niet (de prompt werkt live).
+    public var requiresRestart: Bool {
+        switch self {
+        case .microphone: return false
+        case .accessibility, .inputMonitoring: return true
+        }
+    }
+
+    /// De hint die onder de rij verschijnt zolang de permissie ontbreekt en een herstart
+    /// nodig is, of nil.
+    public var restartHint: String? {
+        requiresRestart ? "Herstart de app nadat je dit hebt aangezet." : nil
+    }
+
+    /// Het anker dat het juiste Privacy-deelvenster in Systeeminstellingen selecteert.
+    public var settingsAnchor: String {
+        switch self {
+        case .microphone: return "Privacy_Microphone"
+        case .accessibility: return "Privacy_Accessibility"
+        case .inputMonitoring: return "Privacy_ListenEvent"
+        }
+    }
+
+    /// De URL die het juiste Systeeminstellingen-paneel opent. KANDIDAAT — twee varianten,
+    /// niet zelf getest (draait op Eriks werkende Mac, ROE §2):
+    ///   A (nu gekozen, System Settings sinds macOS 13):
+    ///       `x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?<anker>`
+    ///   B (klassiek preference-paneel, oudere macOS):
+    ///       `x-apple.systempreferences:com.apple.preference.security?<anker>`
+    /// Erik bevestigt in het review welke op macOS 26 het juiste deelvenster opent; wissel
+    /// dan het prefix hieronder om.
+    public var settingsURLString: String {
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(settingsAnchor)"
+    }
+}
+
+// MARK: - Live status per permissie
+
+/// De status van één permissie in het paneel.
+public struct PermissionItem: Sendable, Equatable {
+    public let kind: PermissionKind
+    public let isGranted: Bool
+
+    public init(kind: PermissionKind, isGranted: Bool) {
+        self.kind = kind
+        self.isGranted = isGranted
+    }
+
+    public var title: String { kind.title }
+    public var effect: String { kind.effect }
+    public var requiresRestart: Bool { kind.requiresRestart }
+
+    /// De statustekst naast de titel.
+    public var statusLabel: String { isGranted ? "✓ toegestaan" : "⚠︎ ontbreekt" }
+
+    /// De titel van de knop die het juiste Systeeminstellingen-paneel opent.
+    public var buttonTitle: String { "Open in Systeeminstellingen" }
+
+    /// De herstart-hint, alleen zolang de permissie ontbreekt en een herstart nodig is.
+    public var restartHint: String? { isGranted ? nil : kind.restartHint }
+}
+
+/// De hele sectie als data: één item per permissie in vaste volgorde, plus de afgeleide
+/// vraag of er iets ontbreekt (voor het statusitem, zichtbaar zonder het menu te openen).
+public struct PermissionsModel: Sendable, Equatable {
+    public let items: [PermissionItem]
+
+    public init(microphoneGranted: Bool, accessibilityGranted: Bool, inputMonitoringGranted: Bool) {
+        self.items = [
+            PermissionItem(kind: .microphone, isGranted: microphoneGranted),
+            PermissionItem(kind: .accessibility, isGranted: accessibilityGranted),
+            PermissionItem(kind: .inputMonitoring, isGranted: inputMonitoringGranted),
+        ]
+    }
+
+    /// Of minstens één permissie ontbreekt — dan toont het statusitem dat er iets mis is.
+    public var anyMissing: Bool { items.contains { !$0.isGranted } }
+
+    /// De ontbrekende permissies, in vaste volgorde.
+    public var missingKinds: [PermissionKind] { items.filter { !$0.isGranted }.map(\.kind) }
+}
+
+// MARK: - Injecteerbare statusbron
+
+/// De drie statuslagen achter één injecteerbaar protocol, zodat de suite een stub geeft
+/// in plaats van echte TCC te lezen (die per machine verschilt en niet vanuit een test te
+/// zetten is).
+public protocol PermissionStatusSource: Sendable {
+    func microphoneGranted() -> Bool
+    func accessibilityGranted() -> Bool
+    func inputMonitoringGranted() -> Bool
+}
+
+/// De echte statusbron: microfoon uit PL-740 (`MicrophonePermission`), Toegankelijkheid
+/// via `AXIsProcessTrusted` (dezelfde check als `CGEventKeystrokeInserter`), Invoerbewaking
+/// via `IOHIDCheckAccess` (`InputMonitoring`). Leest alleen; vraagt niets aan. Mensentest
+/// voor de echte waarden.
+public struct SystemPermissionStatusSource: PermissionStatusSource {
+    private let microphone: MicrophonePermission
+
+    public init(microphone: MicrophonePermission = AVCaptureMicrophonePermission()) {
+        self.microphone = microphone
+    }
+
+    public func microphoneGranted() -> Bool {
+        microphone.authorizationStatus() == .authorized
+    }
+
+    public func accessibilityGranted() -> Bool {
+        #if canImport(CoreGraphics) && canImport(ApplicationServices)
+        return CGEventKeystrokeInserter().isAuthorized
+        #else
+        return true
+        #endif
+    }
+
+    public func inputMonitoringGranted() -> Bool {
+        InputMonitoring.isGranted()
+    }
+}
+
+/// Leest de drie statuslagen op het moment van vragen en levert een `PermissionsModel`.
+/// Cachet niets: elke `snapshot()` leest opnieuw, zodat een omgezet vinkje klopt zonder
+/// herstart van de app.
+public struct PermissionsProbe: Sendable {
+    private let source: PermissionStatusSource
+
+    public init(source: PermissionStatusSource = SystemPermissionStatusSource()) {
+        self.source = source
+    }
+
+    public func snapshot() -> PermissionsModel {
+        PermissionsModel(
+            microphoneGranted: source.microphoneGranted(),
+            accessibilityGranted: source.accessibilityGranted(),
+            inputMonitoringGranted: source.inputMonitoringGranted())
+    }
+}
+
+// MARK: - Eerste start
+
+/// Beslist of de sectie zich bij de eerste start aanbiedt: dan is het gat het grootst en
+/// zijn meestal alle drie de permissies er nog niet. Puur en persistent-onafhankelijk;
+/// de aanroeper geeft de bewaarde vlag en zet hem daarna.
+public enum FirstRunGate {
+    /// Bied het paneel aan als de app nog niet eerder is gestart.
+    public static func shouldOffer(hasLaunchedBefore: Bool) -> Bool {
+        !hasLaunchedBefore
+    }
+}
+
+#if canImport(AppKit)
+import AppKit
+
+// MARK: - AppKit-laag (mensentest)
+
+/// Tekent het `PermissionsModel` als rijen in het publieke `permissionSlot` van
+/// `MenuBarPanelController`, zonder dat paneel-bestand te herbouwen. Leeg (nooit gevuld)
+/// klapt de slot vanzelf tot nul hoogte in. Elke rij: naam + live status, wat er zonder
+/// werkt en niet, een herstart-hint als die geldt, en een knop naar Systeeminstellingen.
+@MainActor
+public final class PermissionsSectionView {
+    /// Aangeroepen als de knop bij een permissie geklikt wordt, met de soort. De aanroeper
+    /// opent het Systeeminstellingen-paneel; deze view opent zelf niets (ROE §2).
+    public var onOpenSettings: ((PermissionKind) -> Void)?
+
+    public init() {}
+
+    /// Vult (of hervult) de slot uit het model. Leest niet zelf de status — de aanroeper
+    /// geeft een vers `snapshot()` zodat de sectie live klopt bij elke opening.
+    public func render(_ model: PermissionsModel, into slot: NSStackView) {
+        for view in slot.arrangedSubviews {
+            slot.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        slot.addArrangedSubview(makeHeader())
+        for item in model.items {
+            slot.addArrangedSubview(makeRow(item))
+        }
+    }
+
+    private func makeHeader() -> NSView {
+        let label = NSTextField(labelWithString: "Permissies")
+        label.textColor = .secondaryLabelColor
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        return label
+    }
+
+    private func makeRow(_ item: PermissionItem) -> NSView {
+        let title = NSTextField(labelWithString: item.title)
+        let status = NSTextField(labelWithString: item.statusLabel)
+        status.textColor = item.isGranted ? .secondaryLabelColor : .systemOrange
+        status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let head = NSStackView(views: [title, NSView(), status])
+        head.orientation = .horizontal
+        head.spacing = 8
+        head.alignment = .centerY
+
+        let effect = NSTextField(wrappingLabelWithString: item.effect)
+        effect.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        effect.textColor = .secondaryLabelColor
+
+        var rows: [NSView] = [head, effect]
+
+        if let hint = item.restartHint {
+            let hintLabel = NSTextField(wrappingLabelWithString: hint)
+            hintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            hintLabel.textColor = .secondaryLabelColor
+            rows.append(hintLabel)
+        }
+
+        let button = NSButton(title: item.buttonTitle, target: self, action: #selector(openClicked(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.identifier = NSUserInterfaceItemIdentifier(item.kind.rawValue)
+        let buttonRow = NSStackView(views: [button, NSView()])
+        buttonRow.orientation = .horizontal
+        rows.append(buttonRow)
+
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        return stack
+    }
+
+    @objc private func openClicked(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue,
+              let kind = PermissionKind(rawValue: raw) else { return }
+        onOpenSettings?(kind)
+    }
+}
+#endif
