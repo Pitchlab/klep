@@ -90,12 +90,12 @@ import Testing
         #expect(refused == .denied(reason: AVCaptureMicrophonePermission.deniedNotice))
     }
 
-    // MARK: - Menu-route (dezelfde als PL-739)
+    // MARK: - Paneel-route (dezelfde als PL-739)
 
-    /// De weigering-reden verschijnt in de menu-header via dezelfde `errorNotice`-route
-    /// die PL-739 voor Accessibility gebruikt.
-    @Test func deniedReasonShowsInMenuHeader() {
-        let model = MenuModel(errorNotice: AVCaptureMicrophonePermission.deniedNotice)
-        #expect(model.headerLines().contains("⚠︎ \(AVCaptureMicrophonePermission.deniedNotice)"))
+    /// De weigering-reden verschijnt onder de statusregel in het paneel via dezelfde
+    /// `errorNotice`-route die PL-739 voor Accessibility gebruikt.
+    @Test func deniedReasonShowsInPanel() {
+        let model = MenuBarPanelModel(errorNotice: AVCaptureMicrophonePermission.deniedNotice)
+        #expect(model.noticeLines().contains("⚠︎ \(AVCaptureMicrophonePermission.deniedNotice)"))
     }
 }

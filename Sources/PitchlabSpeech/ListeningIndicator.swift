@@ -119,7 +119,7 @@ public struct IndicatorPosition: Sendable, Equatable {
     }
 
     /// Het midden van het scherm — de voorspelbare startplek zonder bewaarde positie
-    /// en het doel van het "terug naar het midden"-menu-item.
+    /// en het doel van de "terug naar het midden"-knop bij de statusregel (PL-737).
     public static let center = IndicatorPosition(fractionX: 0.5, fractionY: 0.5)
 }
 
@@ -325,8 +325,9 @@ public final class ListeningIndicatorController {
     }
 
     /// Zet de stip terug naar het midden van het primaire scherm en bewaart die
-    /// positie. Het "terug naar het midden"-menu-item roept dit aan, zodat een stip die
-    /// buiten beeld raakte terug te halen is zonder de config te bewerken.
+    /// positie. De "terug naar het midden"-knop bij de statusregel in het paneel roept
+    /// dit aan (PL-737), zodat een stip die buiten beeld raakte terug te halen is zonder
+    /// de config te bewerken.
     public func resetToCenter() {
         positionStore.save(.center)
         place(.center)

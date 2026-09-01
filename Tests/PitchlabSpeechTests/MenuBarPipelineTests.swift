@@ -114,9 +114,9 @@ import Testing
         #expect(result.indicatorHideCount == 1)
     }
 
-    /// De menu-laag toont een uitvoerfout in de header (R9).
-    @Test func menuShowsErrorNotice() {
-        let model = MenuModel(errorNotice: "Geen Accessibility-toestemming")
-        #expect(model.headerLines().contains("⚠︎ Geen Accessibility-toestemming"))
+    /// Het paneel toont een uitvoerfout onder de statusregel (R9).
+    @Test func panelShowsErrorNotice() {
+        let model = MenuBarPanelModel(errorNotice: "Geen Accessibility-toestemming")
+        #expect(model.noticeLines().contains("⚠︎ Geen Accessibility-toestemming"))
     }
 }
