@@ -23,11 +23,18 @@ import Testing
     /// Beide bestemmingen tegelijk: hetzelfde transcript gaat naar stdout én naar de
     /// (geïnjecteerde) cursor-laag. Bewijst dat de pipeline `TextOutput` op beide
     /// routes voedt.
+    ///
+    /// PL-744: het fixture-transcript eindigt op een zinseinde, dus de cursor-route
+    /// krijgt het transcript plus een spatie erachter (`UtteranceSeparator`) — twee
+    /// inserts: eerst het transcript, dan `" "`. Stdout blijft verbatim (de scheiding
+    /// is een cursor-keuze), dus de stdout-check verandert niet. De gelijkheid staat
+    /// nu op de eerste insert; de spatie is de tweede.
     @Test func runOnceFeedsBothDestinations() async throws {
         let capture = try await PipelineTestSupport.runOnceFixture(to: .both, authorized: true)
         #expect(capture.stdout.lowercased().contains("cursor"))
-        #expect(capture.cursor.count == 1)
+        #expect(capture.cursor.count == 2)
         #expect(capture.cursor.first == capture.returned)
+        #expect(capture.cursor.last == " ")
     }
 
     /// Zonder Accessibility gooit de cursor-route expliciet, nooit stil falen — maar
