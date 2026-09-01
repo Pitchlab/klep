@@ -236,6 +236,47 @@ public struct LaunchAgentManager {
     }
 }
 
+// MARK: - Opstartstand
+
+/// Wat de app bij het opstarten met de bewaarde toggle-standen doet. Puur — geen
+/// AppKit, geen UserDefaults — zodat de keuze getest kan worden zonder runloop.
+///
+/// KEUZE (b) voor hands-free: begin ALTIJD uit en negeer de bewaarde stand, en zet
+/// de bewaarde stand terug op uit zodat het menu ook echt uit toont.
+///
+/// Reden: hands-free opent een live microfoon. De app start bij inloggen via de
+/// LaunchAgent; de mic laten aangaan zonder dat de gebruiker er net op klikte is
+/// verrassend en een privacyrisico. Vóór PL-742 paste `applicationDidFinishLaunching`
+/// de bewaarde stand niet toe: het menu toonde "aan" terwijl er niets luisterde — de
+/// interface loog, en eruit komen kostte twee toggles. Keuze (a) — de stand
+/// herstellen én de sessie starten — haalt de leugen ook weg, maar laat de mic bij
+/// elke login vanzelf luisteren. Uit-beginnen lost de leugen op zonder die
+/// verrassing, en de gebruiker zet hands-free met één toggle weer aan.
+///
+/// KEUZE (a) voor auto-enter: de bewaarde stand blijft staan. Auto-enter opent niets
+/// — hij bepaalt alleen of een uiting met Return wordt afgesloten — dus is er geen
+/// verrassing om tegen te beschermen en geen reden hem te resetten.
+public struct LaunchState: Sendable, Equatable {
+    /// Of de hands-free-keten bij het opstarten moet starten. Onder keuze (b) altijd
+    /// `false`.
+    public let startHandsFree: Bool
+    /// De stand waarop de hands-free-toggle (en dus het menu) gezet wordt. Onder
+    /// keuze (b) altijd `false`, zodat menu-stand en sessie-stand overeenkomen.
+    public let handsFreeOn: Bool
+    /// De stand waarop de auto-enter-toggle gezet wordt: onder keuze (a) de bewaarde
+    /// stand, ongewijzigd.
+    public let autoEnterOn: Bool
+
+    /// Leidt de opstartstand af uit de bewaarde standen: (b) voor hands-free, (a)
+    /// voor auto-enter. `savedHandsFree` wordt bewust genegeerd — dat ís keuze (b).
+    public init(savedHandsFree: Bool, savedAutoEnter: Bool) {
+        _ = savedHandsFree
+        self.startHandsFree = false
+        self.handsFreeOn = false
+        self.autoEnterOn = savedAutoEnter
+    }
+}
+
 #if canImport(AppKit)
 import AppKit
 
@@ -544,10 +585,18 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
         self.hotkeys = hotkeys
-        // De herstelde hands-free-stand loggen: het menu toont hem, maar hij wordt bij
-        // het opstarten niet toegepast (PL-742). De regel maakt dat verschil zichtbaar
-        // in plaats van het stil te laten.
+        // De bewaarde stand bij het opstarten toepassen, niet alleen tonen (PL-742).
+        // Keuze (b): hands-free begint altijd uit — zie `LaunchState`. De bewaarde
+        // stand loggen vóór hij wordt overschreven, zodat de log laat zien wat er
+        // stond, en de toggle daarna hard op uit zetten zodat het menu de werkelijke
+        // (niet-luisterende) stand toont in plaats van te liegen. De hands-free-keten
+        // wordt hier bewust NIET gestart. Auto-enter blijft zoals bewaard (keuze a).
         diagnostics.log(.handsFreeRestored(on: hotkeys.isOn(.handsFree)))
+        let launchState = LaunchState(
+            savedHandsFree: hotkeys.isOn(.handsFree),
+            savedAutoEnter: hotkeys.isOn(.autoEnter))
+        hotkeys.setOn(launchState.handsFreeOn, for: .handsFree)
+        hotkeys.setOn(launchState.autoEnterOn, for: .autoEnter)
         // Eén stip-controller met de meter die de keten voedt: het menu koppelt hem
         // voor "terug naar het midden", de keten toont/verbergt hem op luister-staat.
         let meter = AudioLevelMeter()
@@ -584,6 +633,12 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
         self.hotkeyManager = manager
+
+        // De keten pas starten als de opstartstand daarom vraagt. Onder keuze (b) is
+        // dit altijd `false`, dus start hands-free hier niet vanzelf; de seam maakt
+        // `LaunchState` de enige plek die de keuze bepaalt (zet je hem op (a), dan
+        // start de bewaarde stand hier de sessie).
+        if launchState.startHandsFree { setHandsFree(true, reason: "opstarten") }
     }
 
     /// Start of stop hands-free op basis van de nieuwe toggle-stand. `reason` is de
