@@ -118,8 +118,7 @@ public struct IndicatorPosition: Sendable, Equatable {
         self.fractionY = min(max(fractionY, 0), 1)
     }
 
-    /// Het midden van het scherm — de voorspelbare startplek zonder bewaarde positie
-    /// en het doel van de "terug naar het midden"-knop bij de statusregel (PL-737).
+    /// Het midden van het scherm — de voorspelbare startplek zonder bewaarde positie.
     public static let center = IndicatorPosition(fractionX: 0.5, fractionY: 0.5)
 }
 
@@ -324,10 +323,14 @@ public final class ListeningIndicatorController {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
-    /// Zet de stip terug naar het midden van het primaire scherm en bewaart die
-    /// positie. De "terug naar het midden"-knop bij de statusregel in het paneel roept
-    /// dit aan (PL-737), zodat een stip die buiten beeld raakte terug te halen is zonder
-    /// de config te bewerken.
+    /// Zet de stip terug naar het midden van het primaire scherm en bewaart die positie.
+    ///
+    /// NU ZONDER AANROEPER. Het menu-item dat dit aanriep is met het NSMenu verdwenen
+    /// (PL-764) en er is bewust geen knop voor teruggekomen: PL-747 maakt de positie
+    /// instelbaar als fractie van de schermhoogte, en dan is springen-naar-het-midden
+    /// een geval van die regelaar. PL-747 beslist of deze methode weg kan of de basis
+    /// wordt. Tot dan blijft hij staan als de enige weg terug voor een stip die buiten
+    /// beeld raakte.
     public func resetToCenter() {
         positionStore.save(.center)
         place(.center)
