@@ -244,58 +244,53 @@ public final class PermissionsSectionView {
     }
 
     private func makeDivider() -> NSView {
-        let line = NSBox()
-        line.boxType = .separator
-        return line
+        HotkeySettingsWindowController.divider()
     }
 
     private func makeHeader() -> NSView {
-        let label = NSTextField(labelWithString: "Permissies")
-        label.textColor = .secondaryLabelColor
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        return label
+        HotkeySettingsWindowController.sectionHeader("Permissies")
     }
 
+    /// Eén permissie als drie regels op dezelfde breedte: naam links met de status rechts,
+    /// daaronder wat er zonder werkt en de herstart-hint, en een gecentreerde knop.
+    ///
+    /// Alles loopt door `HotkeySettingsWindowController`'s bouwstenen, zodat dit blok
+    /// dezelfde twee lettergroottes gebruikt als de rest van het venster. Het mengde er
+    /// eerst vijf door elkaar en las daardoor als een verzameling losse dingen.
     private func makeRow(_ item: PermissionItem) -> NSView {
-        let title = NSTextField(labelWithString: item.title)
-        let status = NSTextField(labelWithString: item.statusLabel)
-        status.textColor = item.isGranted ? .secondaryLabelColor : .systemOrange
-        status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        let head = NSStackView(views: [title, NSView(), status])
-        head.orientation = .horizontal
-        head.spacing = 8
-        head.alignment = .centerY
+        let status = HotkeySettingsWindowController.captionLabel(item.statusLabel)
+        if !item.isGranted { status.textColor = .systemOrange }
+        let head = HotkeySettingsWindowController.fullWidthRow(
+            [HotkeySettingsWindowController.rowLabel(item.title), status])
 
-        let effect = NSTextField(wrappingLabelWithString: item.effect)
-        effect.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        effect.textColor = .secondaryLabelColor
-
-        var rows: [NSView] = [head, effect]
-
+        var rows: [NSView] = [head, HotkeySettingsWindowController.captionLabel(
+            item.effect, wrapping: true)]
         if let hint = item.restartHint {
-            let hintLabel = NSTextField(wrappingLabelWithString: hint)
-            hintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            hintLabel.textColor = .secondaryLabelColor
-            rows.append(hintLabel)
+            rows.append(HotkeySettingsWindowController.captionLabel(hint, wrapping: true))
         }
 
-        let button = NSButton(title: item.buttonTitle, target: self, action: #selector(openClicked(_:)))
+        let button = NSButton(
+            title: item.buttonTitle, target: self, action: #selector(openClicked(_:)))
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.identifier = NSUserInterfaceItemIdentifier(item.kind.rawValue)
-        // Gecentreerd, niet links: de knoppen staan onder tekstblokken van
-        // verschillende lengte, en links uitgelijnd leest dat als drie losse rijen in
-        // plaats van drie gelijkwaardige acties. Een lege view aan weerszijden duwt hem
-        // naar het midden.
+        // Gecentreerd, niet links: de knoppen staan onder tekstblokken van verschillende
+        // lengte, en links uitgelijnd leest dat als drie losse rijen in plaats van drie
+        // gelijkwaardige acties.
         let buttonRow = NSStackView(views: [NSView(), button, NSView()])
         buttonRow.orientation = .horizontal
-        buttonRow.distribution = .fill
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+        buttonRow.widthAnchor.constraint(
+            equalToConstant: HotkeySettingsWindowController.contentWidth).isActive = true
         rows.append(buttonRow)
 
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(
+            equalToConstant: HotkeySettingsWindowController.contentWidth).isActive = true
         return stack
     }
 

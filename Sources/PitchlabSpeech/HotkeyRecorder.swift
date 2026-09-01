@@ -321,42 +321,51 @@ public final class HotkeySettingsWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is niet ondersteund") }
 
+    /// De vaste breedte van de inhoud. Elke rij krijgt hem, zodat niets meer op zijn
+    /// eigen inhoud uitlijnt: dat was de klacht — elk onderdeel een andere breedte.
+    static let contentWidth: CGFloat = 400
+
     private func buildContentView() -> NSView {
         let rows: [NSView] = HotkeyAction.allCases.map { action -> NSView in
-            let name = NSTextField(labelWithString: action.title)
-            name.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-            name.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
+            let name = Self.rowLabel(action.title)
+            name.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
             let field = HotkeyRecorderField(action: action, combo: store.combo(for: action))
             field.onRecord = { [weak self] combo in self?.assign(combo, to: action) }
             field.translatesAutoresizingMaskIntoConstraints = false
-            field.heightAnchor.constraint(equalToConstant: 28).isActive = true
-            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 170).isActive = true
+            field.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            field.widthAnchor.constraint(equalToConstant: 150).isActive = true
             fields[action] = field
 
             let reset = NSButton(title: "Standaard", target: self, action: #selector(resetTapped(_:)))
             reset.bezelStyle = .rounded
+            reset.controlSize = .small
             reset.tag = HotkeyAction.allCases.firstIndex(of: action) ?? 0
+            reset.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-            let row = NSStackView(views: [name, field, reset])
-            row.orientation = .horizontal
-            row.spacing = 12
-            row.alignment = .centerY
-            return row
+            return Self.fullWidthRow([name, field, reset])
         }
-        var sections: [NSView] = [sectionHeader("Sneltoetsen")]
+
+        var sections: [NSView] = [Self.sectionHeader("Sneltoetsen")]
         sections.append(contentsOf: rows)
-        if launchAgent != nil { sections.append(makeAutoStartRow()) }
+        if launchAgent != nil {
+            sections.append(Self.divider())
+            sections.append(Self.sectionHeader("Opstarten"))
+            sections.append(makeAutoStartRow())
+        }
         if permissionsProbe != nil {
             permissionSlot.orientation = .vertical
             permissionSlot.spacing = 10
             permissionSlot.alignment = .leading
+            permissionSlot.translatesAutoresizingMaskIntoConstraints = false
+            permissionSlot.widthAnchor.constraint(
+                equalToConstant: Self.contentWidth).isActive = true
             sections.append(permissionSlot)
         }
 
         let stack = NSStackView(views: sections)
         stack.orientation = .vertical
-        stack.spacing = 14
+        stack.spacing = 12
         stack.alignment = .leading
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -372,11 +381,56 @@ public final class HotkeySettingsWindowController: NSWindowController {
         return container
     }
 
-    private func sectionHeader(_ text: String) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.textColor = .secondaryLabelColor
+    // MARK: Bouwstenen, gedeeld met de permissiesectie
+    //
+    // Eén typografische schaal voor het hele venster: rij-labels in de systeemgrootte,
+    // alles wat toelichting is klein en secundair. Het instellingenscherm mengde er vijf
+    // door elkaar, waardoor het als een verzameling losse dingen las in plaats van als
+    // één scherm.
+
+    /// Een rij-label: systeemgrootte, primaire kleur.
+    static func rowLabel(_ text: String) -> NSTextField {
+        NSTextField(labelWithString: text)
+    }
+
+    /// Toelichting onder een rij: klein en secundair.
+    static func captionLabel(_ text: String, wrapping: Bool = false) -> NSTextField {
+        let label = wrapping
+            ? NSTextField(wrappingLabelWithString: text)
+            : NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .secondaryLabelColor
         return label
+    }
+
+    /// Een sectiekop: klein, secundair, in kapitalen zodat hij als kop leest zonder een
+    /// zesde lettergrootte te introduceren.
+    static func sectionHeader(_ text: String) -> NSView {
+        let label = NSTextField(labelWithString: text.uppercased())
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    static func divider() -> NSView {
+        let line = NSBox()
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
+        return line
+    }
+
+    /// Een horizontale rij op de vaste inhoudsbreedte, met het laatste element rechts.
+    static func fullWidthRow(_ views: [NSView]) -> NSView {
+        var all = views
+        if all.count > 1 { all.insert(NSView(), at: all.count - 1) }
+        let row = NSStackView(views: all)
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.alignment = .centerY
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
+        return row
     }
 
     /// Start-bij-inloggen. Stond tot PL-788 in het menubalk-paneel; het is een voorkeur die
@@ -386,13 +440,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
         toggle.state = (launchAgent?.isEnabled() ?? false) ? .on : .off
         toggle.target = self
         toggle.action = #selector(autoStartChanged(_:))
-        let title = NSTextField(labelWithString: "Start automatisch bij inloggen")
-        let row = NSStackView(views: [title, NSView(), toggle])
-        row.orientation = .horizontal
-        row.spacing = 12
-        row.alignment = .centerY
-        row.widthAnchor.constraint(equalToConstant: 400).isActive = true
-        return row
+        return Self.fullWidthRow([Self.rowLabel("Start automatisch bij inloggen"), toggle])
     }
 
     /// Schrijft of verwijdert de LaunchAgent-plist. Een schrijffout gaat naar
