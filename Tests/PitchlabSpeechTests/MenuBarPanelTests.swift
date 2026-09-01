@@ -47,16 +47,21 @@ import Testing
         #expect(model.versionLabel == "v0.3.0")
     }
 
-    @Test func shortcutChipShowsHandsFreeShortcut() {
-        let model = MenuBarPanelModel(handsFreeShortcut: "R⌘")
-        #expect(model.shortcutChip == "R⌘")
+    // MARK: - Toggle-labels dragen hun sneltoets
+
+    /// De toets staat tussen haakjes achter de naam, op één regel. Er stond eerst een
+    /// aparte "Sneltoets"-regel én een hint eronder — twee keer dezelfde toets.
+    @Test func toggleLabelsCarryTheirShortcutInBrackets() {
+        let model = MenuBarPanelModel(handsFreeShortcut: "R⌘", autoEnterShortcut: "⇧R⌘")
+        #expect(model.handsFreeLabel == "Hands-free (R⌘)")
+        #expect(model.autoEnterLabel == "Auto-enter (⇧R⌘)")
     }
 
-    // MARK: - Hands-free: toggle + hint
-
-    @Test func handsFreeHintNamesTheShortcut() {
-        let model = MenuBarPanelModel(handsFreeShortcut: "R⌘")
-        #expect(model.handsFreeHint == "Omschakelen met R⌘")
+    /// Zonder ingestelde toets geen leeg haakjespaar.
+    @Test func toggleLabelsOmitEmptyBrackets() {
+        let model = MenuBarPanelModel()
+        #expect(model.handsFreeLabel == "Hands-free")
+        #expect(model.autoEnterLabel == "Auto-enter")
     }
 
     // MARK: - Microfoon-dropdown
@@ -95,17 +100,30 @@ import Testing
         #expect(MenuBarPanelModel().noticeLines().isEmpty)
     }
 
-    // MARK: - Auto-start bij inloggen (PL-691)
+    // MARK: - Permissie-bannertje (de volledige sectie staat in instellingen, PL-788)
 
-    @Test func autoStartTitleIsStable() {
-        #expect(MenuBarPanelModel().autoStartTitle == "Start automatisch bij inloggen")
+    @Test func permissionBannerIsAbsentWhenNothingMissing() {
+        #expect(MenuBarPanelModel().permissionBanner == nil)
     }
 
-    @Test func autoStartReflectsTheField() {
-        #expect(MenuBarPanelModel(autoStartOn: true).autoStartOn == true)
-        #expect(MenuBarPanelModel(autoStartOn: false).autoStartOn == false)
-        // Standaard uit: los gestart zonder LaunchAgent-plist.
-        #expect(MenuBarPanelModel().autoStartOn == false)
+    @Test func permissionBannerShowsWhatIsMissing() {
+        let model = MenuBarPanelModel(permissionBanner: "Toegankelijkheid ontbreekt.")
+        #expect(model.permissionBanner == "Toegankelijkheid ontbreekt.")
+    }
+
+    // MARK: - Geschiedenis zegt waarom hij uit staat
+
+    /// Een knop die niets doet zonder uitleg leest als kapot.
+    @Test func disabledHistoryCarriesAHint() {
+        let history = MenuBarPanelModel().footerButtons().first { $0.action == .history }
+        #expect(history?.isEnabled == false)
+        #expect(history?.disabledHint == MenuBarPanelModel.historyHint)
+    }
+
+    @Test func enabledFooterButtonsCarryNoHint() {
+        let enabled = MenuBarPanelModel().footerButtons().filter(\.isEnabled)
+        #expect(enabled.count == 2)
+        #expect(enabled.allSatisfy { $0.disabledHint == nil })
     }
 
     // MARK: - Stip terug naar het midden (PL-737)

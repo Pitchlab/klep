@@ -117,4 +117,27 @@ import Testing
         #expect(FirstRunGate.shouldOffer(hasLaunchedBefore: false) == true)
         #expect(FirstRunGate.shouldOffer(hasLaunchedBefore: true) == false)
     }
+    // MARK: - Het bannertje voor het hoofdpaneel (PL-788)
+
+    /// Alles gegeven: geen banner, en dus geen ruis in een paneel dat over dicteren gaat.
+    @Test func bannerIsAbsentWhenEverythingIsGranted() {
+        let model = PermissionsModel(
+            microphoneGranted: true, accessibilityGranted: true, inputMonitoringGranted: true)
+        #expect(model.bannerText == nil)
+    }
+
+    /// Eén ontbrekende permissie wordt bij naam genoemd — "een permissie ontbreekt" laat
+    /// je zoeken.
+    @Test func bannerNamesTheSingleMissingPermission() {
+        let model = PermissionsModel(
+            microphoneGranted: true, accessibilityGranted: false, inputMonitoringGranted: true)
+        #expect(model.bannerText == "Toegankelijkheid ontbreekt.")
+    }
+
+    /// Meerdere ontbrekende permissies staan in de vaste volgorde van de sectie.
+    @Test func bannerListsSeveralMissingPermissionsInOrder() {
+        let model = PermissionsModel(
+            microphoneGranted: false, accessibilityGranted: true, inputMonitoringGranted: false)
+        #expect(model.bannerText == "Ontbreekt: Microfoon, Invoerbewaking.")
+    }
 }

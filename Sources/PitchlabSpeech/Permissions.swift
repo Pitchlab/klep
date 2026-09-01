@@ -1,6 +1,9 @@
 /// De drie permissies die samen bepalen of de app iets doet, als één sectie in het
-/// menubalk-paneel (PL-729). Tot deze taak was het enige signaal een losse ⚠︎-regel in
-/// het menu; Erik zag een uitgezette Toegankelijkheid pas na drie uur zoeken.
+/// instellingenvenster (PL-729, verhuisd in PL-788). Tot PL-729 was het enige signaal een
+/// losse ⚠︎-regel in het menu; Erik zag een uitgezette Toegankelijkheid pas na drie uur
+/// zoeken. Het hoofdpaneel houdt een bannertje (`PermissionsModel.bannerText`) en het
+/// statusitem een waarschuwingsdriehoek — samen de enige melding die je ziet als je nooit
+/// iets opent.
 ///
 /// Twee lagen, net als de rest van de app, zodat de logica zonder runloop te testen is:
 ///  - Pure model-laag (`PermissionKind`, `PermissionItem`, `PermissionsModel`,
@@ -8,8 +11,8 @@
 ///    Systeeminstellingen-URL en de live status-afbeelding. Geen AppKit, geen echte TCC —
 ///    getest in `PermissionsScreenTests`.
 ///  - AppKit-laag (`PermissionsSectionView`), onder `#if canImport(AppKit)`: hangt de
-///    rijen in het publieke `permissionSlot` van `MenuBarPanelController`. Wat je tekent
-///    en het echt openen van een Systeeminstellingen-paneel zijn mensentesten (ROE §2).
+///    rijen in een stackview die de aanroeper levert. Wat je tekent en het echt openen van
+///    een Systeeminstellingen-paneel zijn mensentesten (ROE §2).
 
 import Foundation
 
@@ -122,6 +125,18 @@ public struct PermissionsModel: Sendable, Equatable {
 
     /// De ontbrekende permissies, in vaste volgorde.
     public var missingKinds: [PermissionKind] { items.filter { !$0.isGranted }.map(\.kind) }
+
+    /// De korte regel voor het bannertje in het hoofdpaneel, of nil als alles er is.
+    /// Noemt wát er ontbreekt, want "een permissie ontbreekt" laat je zoeken; de volledige
+    /// uitleg en de knoppen staan in het instellingenvenster.
+    public var bannerText: String? {
+        let missing = missingKinds
+        guard !missing.isEmpty else { return nil }
+        let names = missing.map(\.title).joined(separator: ", ")
+        return missing.count == 1
+            ? "\(names) ontbreekt."
+            : "Ontbreekt: \(names)."
+    }
 }
 
 // MARK: - Injecteerbare statusbron
@@ -198,10 +213,11 @@ import AppKit
 
 // MARK: - AppKit-laag (mensentest)
 
-/// Tekent het `PermissionsModel` als rijen in het publieke `permissionSlot` van
-/// `MenuBarPanelController`, zonder dat paneel-bestand te herbouwen. Leeg (nooit gevuld)
-/// klapt de slot vanzelf tot nul hoogte in. Elke rij: naam + live status, wat er zonder
-/// werkt en niet, een herstart-hint als die geldt, en een knop naar Systeeminstellingen.
+/// Tekent het `PermissionsModel` als rijen in een `NSStackView` die de aanroeper levert.
+/// Sinds PL-788 is dat het instellingenvenster; het hoofdpaneel toont alleen nog een
+/// bannertje. Elke rij: naam + live status, wat er zonder werkt en niet, een herstart-hint
+/// als die geldt, en een gecentreerde knop naar Systeeminstellingen. Divider boven en
+/// onder het blok.
 @MainActor
 public final class PermissionsSectionView {
     /// Aangeroepen als de knop bij een permissie geklikt wordt, met de soort. De aanroeper
@@ -217,10 +233,20 @@ public final class PermissionsSectionView {
             slot.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+        // Divider vóór en ná het blok, zodat de drie permissies als één groep lezen en
+        // niet doorlopen in wat eromheen staat.
+        slot.addArrangedSubview(makeDivider())
         slot.addArrangedSubview(makeHeader())
         for item in model.items {
             slot.addArrangedSubview(makeRow(item))
         }
+        slot.addArrangedSubview(makeDivider())
+    }
+
+    private func makeDivider() -> NSView {
+        let line = NSBox()
+        line.boxType = .separator
+        return line
     }
 
     private func makeHeader() -> NSView {
@@ -257,14 +283,19 @@ public final class PermissionsSectionView {
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.identifier = NSUserInterfaceItemIdentifier(item.kind.rawValue)
-        let buttonRow = NSStackView(views: [button, NSView()])
+        // Gecentreerd, niet links: de knoppen staan onder tekstblokken van
+        // verschillende lengte, en links uitgelijnd leest dat als drie losse rijen in
+        // plaats van drie gelijkwaardige acties. Een lege view aan weerszijden duwt hem
+        // naar het midden.
+        let buttonRow = NSStackView(views: [NSView(), button, NSView()])
         buttonRow.orientation = .horizontal
+        buttonRow.distribution = .fill
         rows.append(buttonRow)
 
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 3
+        stack.spacing = 6
         return stack
     }
 

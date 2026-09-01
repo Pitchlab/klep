@@ -268,25 +268,61 @@ public final class HotkeySettingsWindowController: NSWindowController {
     private let onRebind: ((HotkeyAction, KeyCombo) -> Void)?
     private var fields: [HotkeyAction: HotkeyRecorderField] = [:]
 
-    public init(store: HotkeyStore, onRebind: ((HotkeyAction, KeyCombo) -> Void)? = nil) {
+    /// Leest de drie permissiestatussen; `nil` betekent geen permissieblok (de tests).
+    private let permissionsProbe: PermissionsProbe?
+    private let permissionsSection = PermissionsSectionView()
+    private let permissionSlot = NSStackView()
+    /// Aangeroepen als een permissieknop geklikt wordt. Dit venster opent zelf niets.
+    public var onOpenPrivacySettings: ((PermissionKind) -> Void)?
+
+    /// Leest en zet de auto-start-stand; `nil` betekent geen auto-start-rij.
+    private let launchAgent: LaunchAgentManager?
+    /// Gemeld als het schrijven van de LaunchAgent-plist faalt, zodat de aanroeper het
+    /// zichtbaar maakt in plaats van stil te falen (R9).
+    public var onAutoStartError: ((String) -> Void)?
+
+    public init(
+        store: HotkeyStore,
+        permissionsProbe: PermissionsProbe? = nil,
+        launchAgent: LaunchAgentManager? = nil,
+        onRebind: ((HotkeyAction, KeyCombo) -> Void)? = nil
+    ) {
         self.store = store
+        self.permissionsProbe = permissionsProbe
+        self.launchAgent = launchAgent
         self.onRebind = onRebind
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
-        window.title = "Sneltoetsen"
+        window.title = "Instellingen"
         super.init(window: window)
+        permissionsSection.onOpenSettings = { [weak self] kind in
+            self?.onOpenPrivacySettings?(kind)
+        }
         window.contentView = buildContentView()
         window.center()
+    }
+
+    /// Leest de permissies vers en hertekent het blok. Aangeroepen bij elke keer tonen,
+    /// zodat een vinkje dat je net omzette klopt zonder herstart — dezelfde eis als toen
+    /// het blok nog in het paneel zat (PL-729).
+    public func refreshPermissions() {
+        guard let permissionsProbe else { return }
+        permissionsSection.render(permissionsProbe.snapshot(), into: permissionSlot)
+    }
+
+    public override func showWindow(_ sender: Any?) {
+        refreshPermissions()
+        super.showWindow(sender)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is niet ondersteund") }
 
     private func buildContentView() -> NSView {
-        let rows: [NSView] = HotkeyAction.allCases.map { action in
+        let rows: [NSView] = HotkeyAction.allCases.map { action -> NSView in
             let name = NSTextField(labelWithString: action.title)
             name.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             name.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
@@ -308,9 +344,19 @@ public final class HotkeySettingsWindowController: NSWindowController {
             row.alignment = .centerY
             return row
         }
-        let stack = NSStackView(views: rows)
+        var sections: [NSView] = [sectionHeader("Sneltoetsen")]
+        sections.append(contentsOf: rows)
+        if launchAgent != nil { sections.append(makeAutoStartRow()) }
+        if permissionsProbe != nil {
+            permissionSlot.orientation = .vertical
+            permissionSlot.spacing = 10
+            permissionSlot.alignment = .leading
+            sections.append(permissionSlot)
+        }
+
+        let stack = NSStackView(views: sections)
         stack.orientation = .vertical
-        stack.spacing = 12
+        stack.spacing = 14
         stack.alignment = .leading
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -324,6 +370,42 @@ public final class HotkeySettingsWindowController: NSWindowController {
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
         return container
+    }
+
+    private func sectionHeader(_ text: String) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.textColor = .secondaryLabelColor
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        return label
+    }
+
+    /// Start-bij-inloggen. Stond tot PL-788 in het menubalk-paneel; het is een voorkeur die
+    /// je één keer zet, en het paneel gaat over dicteren.
+    private func makeAutoStartRow() -> NSView {
+        let toggle = NSSwitch()
+        toggle.state = (launchAgent?.isEnabled() ?? false) ? .on : .off
+        toggle.target = self
+        toggle.action = #selector(autoStartChanged(_:))
+        let title = NSTextField(labelWithString: "Start automatisch bij inloggen")
+        let row = NSStackView(views: [title, NSView(), toggle])
+        row.orientation = .horizontal
+        row.spacing = 12
+        row.alignment = .centerY
+        row.widthAnchor.constraint(equalToConstant: 400).isActive = true
+        return row
+    }
+
+    /// Schrijft of verwijdert de LaunchAgent-plist. Een schrijffout gaat naar
+    /// `onAutoStartError` en de schakelaar springt terug, zodat het venster niet aan blijft
+    /// staan terwijl er niets geschreven is (R9).
+    @objc private func autoStartChanged(_ sender: NSSwitch) {
+        guard let launchAgent else { return }
+        do {
+            if sender.state == .on { try launchAgent.enable() } else { try launchAgent.disable() }
+        } catch {
+            sender.state = sender.state == .on ? .off : .on
+            onAutoStartError?("Auto-start kon niet ingesteld worden.")
+        }
     }
 
     /// Wijst een opgenomen combinatie toe (met conflict-check) en registreert hem live.

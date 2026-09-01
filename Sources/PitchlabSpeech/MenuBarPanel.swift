@@ -110,10 +110,13 @@ public enum PanelAction: String, Sendable, Equatable {
 public struct FooterButton: Sendable, Equatable {
     public let action: PanelAction
     public let isEnabled: Bool
+    /// Waarom de knop uit staat, als hij uit staat. Hangt als tooltip aan de knop.
+    public let disabledHint: String?
 
-    public init(action: PanelAction, isEnabled: Bool) {
+    public init(action: PanelAction, isEnabled: Bool, disabledHint: String? = nil) {
         self.action = action
         self.isEnabled = isEnabled
+        self.disabledHint = disabledHint
     }
 
     public var title: String { action.title }
@@ -130,13 +133,16 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// draait er nu" een echte vraag (analysis.md).
     public var version: String
     public var handsFreeOn: Bool
-    /// De sneltoets die hands-free omschakelt, als leesbare tekst (bv. "R⌘"). Vult
-    /// zowel de toetsenchip als de hint onder de toggle.
+    /// De sneltoets die hands-free omschakelt, als leesbare tekst (bv. "R⌘"). Staat
+    /// tussen haakjes achter de toggle, niet op een eigen regel.
     public var handsFreeShortcut: String
     public var autoEnterOn: Bool
-    /// Of de app bij inloggen start (de LaunchAgent-plist bestaat). Aan/uit is een
-    /// toggle, dus hij hoort in het paneel — niet in een apart venster (PL-691).
-    public var autoStartOn: Bool
+    /// De sneltoets die auto-enter omschakelt (bv. "⇧R⌘"). Ook achter zijn toggle.
+    public var autoEnterShortcut: String
+    /// Korte melding als er een permissie ontbreekt, of nil. De volledige sectie staat
+    /// in het instellingenvenster (PL-788); hier alleen dit bannertje, zodat het paneel
+    /// over dicteren gaat en niet over configureren.
+    public var permissionBanner: String?
     /// De keuzelijst voor de microfoon-dropdown.
     public var devices: [DeviceInfo]
     /// De id van het gekozen apparaat, voor de selectie in de dropdown.
@@ -156,7 +162,8 @@ public struct MenuBarPanelModel: Sendable, Equatable {
         handsFreeOn: Bool = false,
         handsFreeShortcut: String = "",
         autoEnterOn: Bool = false,
-        autoStartOn: Bool = false,
+        autoEnterShortcut: String = "",
+        permissionBanner: String? = nil,
         devices: [DeviceInfo] = [],
         selectedDeviceID: String? = nil,
         fallbackNotice: String? = nil,
@@ -168,7 +175,8 @@ public struct MenuBarPanelModel: Sendable, Equatable {
         self.handsFreeOn = handsFreeOn
         self.handsFreeShortcut = handsFreeShortcut
         self.autoEnterOn = autoEnterOn
-        self.autoStartOn = autoStartOn
+        self.autoEnterShortcut = autoEnterShortcut
+        self.permissionBanner = permissionBanner
         self.devices = devices
         self.selectedDeviceID = selectedDeviceID
         self.fallbackNotice = fallbackNotice
@@ -182,19 +190,23 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// Het versienummer voor de kop, met de gebruikelijke `v`-prefix.
     public var versionLabel: String { "v\(version)" }
 
-    /// De tekst op de alleen-lezen toetsenchip. Klikken opent het sneltoets-instelscherm
-    /// (PL-733); de chip zelf wijzigt niets.
-    public var shortcutChip: String { handsFreeShortcut }
+    /// Het label bij de hands-free-toggle, met zijn sneltoets tussen haakjes erachter.
+    ///
+    /// Eén regel in plaats van drie. Er stond eerst een aparte "Sneltoets"-regel bovenaan
+    /// én een hint "Omschakelen met R⌘" onder de toggle — twee keer dezelfde toets, en de
+    /// hint dwong de toggle-rij in een verticale stack met `.leading`, waardoor hij naar
+    /// links kroop terwijl auto-enter er rechts stond. De haakjes lossen de herhaling en
+    /// de scheve uitlijning in één keer op.
+    public var handsFreeLabel: String { label("Hands-free", handsFreeShortcut) }
 
-    public var handsFreeTitle: String { "Hands-free" }
+    /// Idem voor auto-enter: `Auto-enter (⇧R⌘)`.
+    public var autoEnterLabel: String { label("Auto-enter", autoEnterShortcut) }
 
-    /// De hint onder de hands-free-toggle: welke toets hem omschakelt.
-    public var handsFreeHint: String { "Omschakelen met \(handsFreeShortcut)" }
-
-    public var autoEnterTitle: String { "Auto-enter" }
-
-    /// De titel van de auto-start-toggle (de stand komt van `autoStartOn`).
-    public var autoStartTitle: String { "Start automatisch bij inloggen" }
+    /// `Naam (toets)`, of alleen de naam als er geen toets ingesteld is — anders staat er
+    /// een leeg haakjespaar.
+    private func label(_ name: String, _ shortcut: String) -> String {
+        shortcut.isEmpty ? name : "\(name) (\(shortcut))"
+    }
 
     /// De tekst op de "terug naar het midden"-knop bij de statusregel; ook de
     /// tooltip/VoiceOver-tekst. Zet de luister-stip terug in het midden (PL-737).
@@ -228,10 +240,14 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     public func footerButtons() -> [FooterButton] {
         [
             FooterButton(action: .settings, isEnabled: true),
-            FooterButton(action: .history, isEnabled: false),
+            FooterButton(action: .history, isEnabled: false, disabledHint: Self.historyHint),
             FooterButton(action: .quit, isEnabled: true),
         ]
     }
+
+    /// Waarom Geschiedenis uit staat. Een knop die niets doet zonder uitleg leest als
+    /// kapot; deze tekst hangt eraan als tooltip tot PL-757 hem inhoud geeft.
+    public static let historyHint = "Nog geen geschiedenis — transcripten worden nog niet bewaard."
 }
 
 #if canImport(AppKit)
@@ -239,23 +255,21 @@ import AppKit
 
 // MARK: - AppKit-laag (mensentest)
 
-/// Tekent het `MenuBarPanelModel` als een kolom views in een `NSPopover`. De rijen van
-/// boven naar beneden: statusregel met stip, versie en — als de stip gekoppeld is — een
-/// "terug naar het midden"-knop (PL-737), de alleen-lezen toetsenchip, hands-free-toggle
-/// met hint, een lege plek voor de permissiestatus (PL-729), de auto-enter-toggle, een
-/// lege plek voor de auto-enter-vertraging (PL-746), de microfoon-dropdown, de
-/// auto-start-toggle (PL-691) en de voetrij. De twee lege plekken (`permissionSlot`,
-/// `autoEnterDelaySlot`) zijn publieke stackviews zodat PL-729 en PL-746 hun view erin
-/// hangen zonder dit bestand te herbouwen; leeg klappen ze tot nul hoogte in.
+/// Tekent het `MenuBarPanelModel` als een kolom views in een `NSPopover`. De volgorde,
+/// van boven naar beneden: statusregel met stip, versie en — als de stip gekoppeld is —
+/// een "terug naar het midden"-knop (PL-737); de ⚠︎-meldingen; een bannertje als er een
+/// permissie ontbreekt; divider; microfoon; hands-free; auto-enter; een lege plek voor de
+/// auto-enter-vertraging (PL-746); divider; de voetrij.
 ///
-/// PLAATSING van de twee teruggekeerde acties. Auto-start staat als toggle onder de
-/// microfoon en boven de voetrij: het is een aan/uit-voorkeur zoals hands-free en
-/// auto-enter, maar een die je zelden omzet, dus laag in de kolom en niet tussen de
-/// dictaat-toggles. "Terug naar het midden" hoort bij de statusregel, niet in de
-/// voetrij: de knop werkt op de luister-stip, en de statusregel is het echo daarvan;
-/// zo blijft de voetrij de drie navigatie-acties (Instellingen/Geschiedenis/Stoppen)
-/// die de spec vastlegt. De knop verschijnt alleen als de stip gekoppeld is
-/// (`canRecenter`), zodat een dood knopje nooit getekend wordt.
+/// MICROFOON BOVENAAN, want dat is wat je het vaakst aanraakt. Daaronder de twee
+/// dictaat-toggles, allebei door `makeToggleRow` zodat ze niet meer verschillend
+/// uitgelijnd kunnen raken — dat gebeurde toen hands-free een hint onder zich had en
+/// daardoor in een `.leading`-stack zat terwijl auto-enter rechts uitlijnde.
+///
+/// WAT HIER NIET MEER STAAT: de aparte "Sneltoets"-regel (de toets staat nu tussen
+/// haakjes achter zijn toggle), de auto-start-toggle en de volledige permissiesectie.
+/// Die laatste twee staan in het instellingenvenster (PL-788); hier blijft alleen het
+/// bannertje, zodat dit paneel over dicteren gaat en niet over configureren.
 ///
 /// Runtime niet gedekt door de unit-tests: een paneel tonen vraagt een NSApplication-
 /// runloop en is een mensentest. De testbare logica zit in `MenuBarPanelModel`.
@@ -266,8 +280,6 @@ public final class MenuBarPanelController: NSViewController {
     /// De vaste breedte van het paneel in punten.
     private static let panelWidth: CGFloat = 300
 
-    /// Lege plek voor de permissiestatus (PL-729). Later gevuld; nu nul hoogte.
-    public let permissionSlot = NSStackView()
     /// Lege plek voor de auto-enter-vertraging als schuifregelaar (PL-746).
     public let autoEnterDelaySlot = NSStackView()
 
@@ -280,14 +292,10 @@ public final class MenuBarPanelController: NSViewController {
     public var onToggleHandsFree: ((Bool) -> Void)?
     /// Auto-enter omgeschakeld via het paneel, met de nieuwe stand.
     public var onToggleAutoEnter: ((Bool) -> Void)?
-    /// Auto-start (start bij inloggen) omgeschakeld via het paneel, met de nieuwe stand.
-    public var onToggleAutoStart: ((Bool) -> Void)?
     /// De "terug naar het midden"-knop aangeklikt: zet de luister-stip terug (PL-737).
     public var onRecenter: (() -> Void)?
     /// Een microfoon gekozen, met de `uniqueID`.
     public var onSelectDevice: ((String) -> Void)?
-    /// De toetsenchip aangeklikt: open het sneltoets-instelscherm (PL-733).
-    public var onOpenShortcutSettings: (() -> Void)?
     /// Een voetknop aangeklikt, met de actie.
     public var onFooterAction: ((PanelAction) -> Void)?
 
@@ -302,12 +310,10 @@ public final class MenuBarPanelController: NSViewController {
     public override func loadView() {
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = 10
+        column.spacing = 14
         column.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         column.translatesAutoresizingMaskIntoConstraints = false
 
-        permissionSlot.orientation = .vertical
-        permissionSlot.spacing = 6
         autoEnterDelaySlot.orientation = .vertical
         autoEnterDelaySlot.spacing = 6
 
@@ -335,7 +341,7 @@ public final class MenuBarPanelController: NSViewController {
     private func rebuild() {
         for view in column.arrangedSubviews {
             column.removeArrangedSubview(view)
-            if view !== permissionSlot, view !== autoEnterDelaySlot {
+            if view !== autoEnterDelaySlot {
                 view.removeFromSuperview()
             }
         }
@@ -344,14 +350,48 @@ public final class MenuBarPanelController: NSViewController {
         for line in model.noticeLines() {
             column.addArrangedSubview(makeNoticeLabel(line))
         }
-        column.addArrangedSubview(makeShortcutRow())
+        if let banner = model.permissionBanner {
+            column.addArrangedSubview(makePermissionBanner(banner))
+        }
+        column.addArrangedSubview(makeDivider())
+        column.addArrangedSubview(makeMicrophoneRow())
         column.addArrangedSubview(makeHandsFreeRow())
-        column.addArrangedSubview(permissionSlot)   // PL-729
         column.addArrangedSubview(makeAutoEnterRow())
         column.addArrangedSubview(autoEnterDelaySlot) // PL-746
-        column.addArrangedSubview(makeMicrophoneRow())
-        column.addArrangedSubview(makeAutoStartRow())
+        column.addArrangedSubview(makeDivider())
         column.addArrangedSubview(makeFooterRow())
+    }
+
+    /// Een dunne scheidingslijn over de volle breedte, zodat de blokken uit elkaar
+    /// vallen in plaats van als één lijst te lezen.
+    private func makeDivider() -> NSView {
+        let line = NSBox()
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: Self.panelWidth - 28).isActive = true
+        return line
+    }
+
+    /// Het bannertje dat zegt dat er een permissie ontbreekt, met een route naar het
+    /// instellingenvenster waar de volledige sectie staat. Alleen zichtbaar als er echt
+    /// iets ontbreekt; verder blijft het paneel over dicteren gaan.
+    private func makePermissionBanner(_ text: String) -> NSView {
+        let label = Self.label(text)
+        label.textColor = .systemOrange
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let open = NSButton(
+            title: "Instellingen", target: self, action: #selector(openSettingsFromBanner))
+        open.bezelStyle = .rounded
+        open.controlSize = .small
+        let row = NSStackView(views: [label, NSView(), open])
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.alignment = .centerY
+        return row
+    }
+
+    @objc private func openSettingsFromBanner() {
+        onFooterAction?(.settings)
     }
 
     private func makeStatusRow() -> NSView {
@@ -392,14 +432,16 @@ public final class MenuBarPanelController: NSViewController {
         return label
     }
 
-    private func makeShortcutRow() -> NSView {
-        let chip = NSButton(title: model.shortcutChip, target: self, action: #selector(chipClicked))
-        chip.bezelStyle = .rounded
-        chip.controlSize = .small
-        chip.toolTip = "Sneltoets aanpassen"
-        let caption = Self.label("Sneltoets")
-        caption.textColor = .secondaryLabelColor
-        let row = NSStackView(views: [caption, NSView(), chip])
+    /// Eén toggle-rij: label links, schakelaar rechts. Beide dictaat-toggles lopen hier
+    /// doorheen, zodat ze niet meer verschillend uitgelijnd kunnen raken.
+    private func makeToggleRow(
+        _ title: String, isOn: Bool, action: Selector
+    ) -> NSView {
+        let toggle = NSSwitch()
+        toggle.state = isOn ? .on : .off
+        toggle.target = self
+        toggle.action = action
+        let row = NSStackView(views: [Self.label(title), NSView(), toggle])
         row.orientation = .horizontal
         row.spacing = 8
         row.alignment = .centerY
@@ -407,51 +449,15 @@ public final class MenuBarPanelController: NSViewController {
     }
 
     private func makeHandsFreeRow() -> NSView {
-        let toggle = NSSwitch()
-        toggle.state = model.handsFreeOn ? .on : .off
-        toggle.target = self
-        toggle.action = #selector(handsFreeChanged(_:))
-        let title = Self.label(model.handsFreeTitle)
-        let top = NSStackView(views: [title, NSView(), toggle])
-        top.orientation = .horizontal
-        top.spacing = 8
-        top.alignment = .centerY
-
-        let hint = Self.label(model.handsFreeHint)
-        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        hint.textColor = .secondaryLabelColor
-
-        let stack = NSStackView(views: [top, hint])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 2
-        return stack
+        makeToggleRow(
+            model.handsFreeLabel, isOn: model.handsFreeOn,
+            action: #selector(handsFreeChanged(_:)))
     }
 
     private func makeAutoEnterRow() -> NSView {
-        let toggle = NSSwitch()
-        toggle.state = model.autoEnterOn ? .on : .off
-        toggle.target = self
-        toggle.action = #selector(autoEnterChanged(_:))
-        let title = Self.label(model.autoEnterTitle)
-        let row = NSStackView(views: [title, NSView(), toggle])
-        row.orientation = .horizontal
-        row.spacing = 8
-        row.alignment = .centerY
-        return row
-    }
-
-    private func makeAutoStartRow() -> NSView {
-        let toggle = NSSwitch()
-        toggle.state = model.autoStartOn ? .on : .off
-        toggle.target = self
-        toggle.action = #selector(autoStartChanged(_:))
-        let title = Self.label(model.autoStartTitle)
-        let row = NSStackView(views: [title, NSView(), toggle])
-        row.orientation = .horizontal
-        row.spacing = 8
-        row.alignment = .centerY
-        return row
+        makeToggleRow(
+            model.autoEnterLabel, isOn: model.autoEnterOn,
+            action: #selector(autoEnterChanged(_:)))
     }
 
     private func makeMicrophoneRow() -> NSView {
@@ -502,7 +508,6 @@ public final class MenuBarPanelController: NSViewController {
 
     // MARK: Acties
 
-    @objc private func chipClicked() { onOpenShortcutSettings?() }
 
     @objc private func handsFreeChanged(_ sender: NSSwitch) {
         onToggleHandsFree?(sender.state == .on)
@@ -510,10 +515,6 @@ public final class MenuBarPanelController: NSViewController {
 
     @objc private func autoEnterChanged(_ sender: NSSwitch) {
         onToggleAutoEnter?(sender.state == .on)
-    }
-
-    @objc private func autoStartChanged(_ sender: NSSwitch) {
-        onToggleAutoStart?(sender.state == .on)
     }
 
     @objc private func recenterClicked() { onRecenter?() }

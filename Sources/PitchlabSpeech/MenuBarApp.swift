@@ -214,9 +214,10 @@ public final class MenuBarController: NSObject {
     /// Leest de drie permissiestatussen live (PL-729); cachet niets, zodat een omgezet
     /// vinkje klopt zonder herstart.
     private let permissionsProbe: PermissionsProbe
-    private let permissionsSection = PermissionsSectionView()
     /// Of er nu een permissie ontbreekt; het statusitem toont dat dan zonder het menu.
     private var permissionsMissing = false
+    /// De korte permissie-melding voor het paneel, of nil als alles er is.
+    private var permissionBanner: String?
     /// Aangeroepen als de hands-free-toggle via het paneel wisselt, met de nieuwe stand.
     /// De delegate hangt hier het starten/stoppen van de luister-keten aan, zodat de
     /// paneel-klik dezelfde keten start als de globale sneltoets (niet enkel een boolean).
@@ -259,18 +260,6 @@ public final class MenuBarController: NSObject {
             self?.hotkeys.setOn(isOn, for: .autoEnter)
             self?.refreshHotkeyState()
         }
-        // Auto-start om: schrijf/verwijder de LaunchAgent-plist en herbouw het model
-        // uit de nieuwe stand. Een schrijffout landt zichtbaar in de statusregel (R9),
-        // niet stil (PL-691).
-        panel.onToggleAutoStart = { [weak self] isOn in
-            guard let self else { return }
-            do {
-                if isOn { try self.launchAgent.enable() } else { try self.launchAgent.disable() }
-            } catch {
-                self.showError("Auto-start kon niet ingesteld worden.")
-            }
-            self.refresh()
-        }
         // Terug naar het midden: zet de luister-stip terug (PL-737). Alleen gekoppeld
         // als er een stip is; de knop verschijnt anders niet (`canRecenter`).
         panel.onRecenter = { [weak self] in self?.listeningIndicator?.resetToCenter() }
@@ -280,7 +269,6 @@ public final class MenuBarController: NSObject {
             self.selector.select(device)
             self.refresh()
         }
-        panel.onOpenShortcutSettings = { [weak self] in self?.openHotkeySettings() }
         panel.onFooterAction = { [weak self] action in
             switch action {
             case .settings: self?.openHotkeySettings()
@@ -289,11 +277,6 @@ public final class MenuBarController: NSObject {
             }
         }
 
-        // De permissie-sectie (PL-729) opent zelf geen Systeeminstellingen; de knop hangt
-        // hier aan de open-actie zodat het echt openen een mensentest blijft (ROE §2).
-        permissionsSection.onOpenSettings = { [weak self] kind in
-            self?.openPrivacySettings(for: kind)
-        }
         refreshPermissions()
 
         if let button = statusItem.button {
@@ -324,12 +307,16 @@ public final class MenuBarController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Leest de drie permissiestatussen live en hertekent de sectie in het `permissionSlot`.
-    /// Onthoudt of er iets ontbreekt zodat het statusitem dat toont zonder het menu.
+    /// Leest de drie permissiestatussen live en bewaart wat het paneel ervan toont.
+    ///
+    /// De volledige sectie staat sinds PL-788 in het instellingenvenster; hier blijft
+    /// alleen een bannertje plus de waarschuwingsdriehoek op het statusitem. Die twee
+    /// samen zijn de enige melding die je ziet als je nooit iets opent, en dat was de
+    /// eis die bij de verhuizing niet mocht sneuvelen.
     private func refreshPermissions() {
-        let model = permissionsProbe.snapshot()
-        permissionsMissing = model.anyMissing
-        permissionsSection.render(model, into: panel.permissionSlot)
+        let snapshot = permissionsProbe.snapshot()
+        permissionsMissing = snapshot.anyMissing
+        permissionBanner = snapshot.bannerText
         drawStatusButton()
     }
 
@@ -418,13 +405,28 @@ public final class MenuBarController: NSObject {
     /// Opent het sneltoets-instellingenvenster (per actie een opnameveld + reset-knop).
     /// De store is dezelfde als het statusitem gebruikt, dus een nieuwe combinatie is
     /// meteen elders zichtbaar; `onRebindHotkey` registreert hem live.
-    @objc private func openHotkeySettings() {
-        let controller = hotkeySettings ?? HotkeySettingsWindowController(
+    /// Bouwt het instellingenvenster: sneltoetsen, auto-start en de permissiesectie
+    /// (PL-788). Het venster opent zelf geen Systeeminstellingen — die knop komt hierheen
+    /// terug, zodat het echt openen een mensentest blijft (ROE §2). Een schrijffout bij
+    /// auto-start landt zichtbaar in de statusregel in plaats van stil te verdwijnen (R9).
+    private func makeSettingsWindow() -> HotkeySettingsWindowController {
+        let controller = HotkeySettingsWindowController(
             store: hotkeys,
+            permissionsProbe: permissionsProbe,
+            launchAgent: launchAgent,
             onRebind: { [weak self] action, combo in
                 self?.onRebindHotkey?(action, combo)
                 self?.refreshHotkeyState()
             })
+        controller.onOpenPrivacySettings = { [weak self] kind in
+            self?.openPrivacySettings(for: kind)
+        }
+        controller.onAutoStartError = { [weak self] message in self?.showError(message) }
+        return controller
+    }
+
+    @objc private func openHotkeySettings() {
+        let controller = hotkeySettings ?? makeSettingsWindow()
         hotkeySettings = controller
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -481,7 +483,8 @@ public final class MenuBarController: NSObject {
             handsFreeOn: hotkeys.isOn(.handsFree),
             handsFreeShortcut: hotkeys.combo(for: .handsFree).display,
             autoEnterOn: hotkeys.isOn(.autoEnter),
-            autoStartOn: model.autoStartEnabled,
+            autoEnterShortcut: hotkeys.combo(for: .autoEnter).display,
+            permissionBanner: permissionBanner,
             devices: model.devices,
             selectedDeviceID: model.selectedDeviceID,
             fallbackNotice: model.fallbackNotice,
