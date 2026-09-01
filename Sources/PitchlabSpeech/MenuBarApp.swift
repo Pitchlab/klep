@@ -291,6 +291,11 @@ public final class MenuBarController: NSObject {
     /// De laatste uitvoerfout, bewaard los van `model` zodat `refresh()` (die het
     /// model herbouwt uit microfoon + auto-start) de melding niet wist (R9).
     private var errorNotice: String?
+    /// De popover die het bedieningspaneel toont, geankerd aan de statusitem-knop, en
+    /// de controller die het model erin tekent. Vervangt het vroegere `NSMenu`: een menu
+    /// kan geen schuifregelaar met een zichtbare waarde dragen (zie `MenuBarPanel.swift`).
+    private let popover = NSPopover()
+    private let panel = MenuBarPanelController()
     /// Aangeroepen als de hands-free-toggle via het menu wisselt, met de nieuwe stand.
     /// De delegate hangt hier het starten/stoppen van de luister-keten aan, zodat de
     /// menu-klik dezelfde keten start als de globale sneltoets (niet enkel een boolean).
@@ -309,7 +314,58 @@ public final class MenuBarController: NSObject {
         self.listeningIndicator = listeningIndicator
         self.model = MenuModel()
         super.init()
+        configurePopover()
         refresh()
+    }
+
+    /// Zet de popover op, wire de paneel-callbacks naar dezelfde acties die het menu
+    /// vroeger had, en laat een klik op de statusitem-knop het paneel openen/sluiten.
+    private func configurePopover() {
+        popover.behavior = .transient
+        popover.contentViewController = panel
+
+        panel.onToggleHandsFree = { [weak self] isOn in
+            guard let self else { return }
+            // Dezelfde stand die de globale sneltoets zet; daarna de balk hertekenen en
+            // de luister-keten starten/stoppen (niet enkel de boolean wisselen).
+            self.hotkeys.setOn(isOn, for: .handsFree)
+            self.refreshHotkeyState()
+            self.onHandsFreeChanged?(isOn)
+        }
+        panel.onToggleAutoEnter = { [weak self] isOn in
+            self?.hotkeys.setOn(isOn, for: .autoEnter)
+            self?.refreshHotkeyState()
+        }
+        panel.onSelectDevice = { [weak self] id in
+            guard let self,
+                  let device = self.model.devices.first(where: { $0.uniqueID == id }) else { return }
+            self.selector.select(device)
+            self.refresh()
+        }
+        panel.onOpenShortcutSettings = { [weak self] in self?.openHotkeySettings() }
+        panel.onFooterAction = { [weak self] action in
+            switch action {
+            case .settings: self?.openHotkeySettings()
+            case .history: break   // uit tot PL-757 de inhoud levert
+            case .quit: self?.quit()
+            }
+        }
+
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(togglePanel(_:))
+        }
+    }
+
+    /// Opent of sluit het bedieningspaneel onder de statusitem-knop.
+    @objc private func togglePanel(_ sender: Any?) {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// Hoogte van de samengestelde statusbalk-glyph in punten; de menubalk schaalt
@@ -367,9 +423,10 @@ public final class MenuBarController: NSObject {
         return canvas
     }
 
-    /// Hertekent na een hotkey-toggle, zodat de balk de nieuwe stand meteen toont.
+    /// Hertekent na een hotkey-toggle, zodat de balk en het paneel de nieuwe stand
+    /// meteen tonen.
     public func refreshHotkeyState() {
-        rebuildMenu()
+        rebuildPanel()
     }
 
     /// Gezet door de delegate, die de live hotkey-manager kent om een opnieuw
@@ -406,7 +463,7 @@ public final class MenuBarController: NSObject {
             devices: selector.availableDevices(),
             selectedDeviceID: resolution.device?.uniqueID ?? selector.selectedDeviceID,
             autoStartEnabled: launchAgent.isEnabled())
-        rebuildMenu()
+        rebuildPanel()
     }
 
     /// Het apparaat dat nu gebruikt wordt (of nil = systeemstandaard), zodat de
@@ -421,117 +478,34 @@ public final class MenuBarController: NSObject {
     public func showError(_ message: String?) {
         errorNotice = message
         model.errorNotice = message
-        rebuildMenu()
+        rebuildPanel()
     }
 
     /// Werkt de getoonde staat bij (aangeroepen door de capture-pijplijn in een
-    /// latere taak) en tekent het icoon en de eerste menuregel opnieuw.
+    /// latere taak) en tekent het icoon en het paneel opnieuw.
     public func update(state: SpeechState) {
         model.state = state
+        rebuildPanel()
+    }
+
+    /// Bouwt het paneel-model uit de huidige microfoon-, hotkey- en versiegegevens en
+    /// tekent het paneel opnieuw. De statusbalk-glyph gaat mee (`drawStatusButton`).
+    /// Het versienummer komt uit de bundel (`CFBundleShortVersionString`, gezet door
+    /// `scripts/build-app.sh`); los gestart zonder bundel valt het terug op `0.0.0`.
+    private func rebuildPanel() {
         drawStatusButton()
-        rebuildMenu()
-    }
-
-    private func rebuildMenu() {
-        drawStatusButton()
-        let menu = NSMenu()
-
-        for line in model.headerLines() {
-            let item = NSMenuItem(title: line, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-
-        // De twee globale toggles als klikbare items: klikken wisselt dezelfde stand
-        // als de sneltoets, de checkmark toont de stand, de sneltoets staat ernaast
-        // als hint.
-        for row in hotkeyToggleRows(store: hotkeys) {
-            let item = NSMenuItem(
-                title: row.menuTitle, action: #selector(toggleHotkey(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = row.action.rawValue
-            item.state = row.isOn ? .on : .off
-            menu.addItem(item)
-        }
-
-        menu.addItem(.separator())
-
-        let micMenu = NSMenu()
-        for device in model.devices {
-            let item = NSMenuItem(
-                title: device.localizedName, action: #selector(chooseDevice(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = device.uniqueID
-            item.state = (device.uniqueID == model.selectedDeviceID) ? .on : .off
-            micMenu.addItem(item)
-        }
-        if model.devices.isEmpty {
-            let empty = NSMenuItem(title: "(geen microfoons gevonden)", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            micMenu.addItem(empty)
-        }
-        let micItem = NSMenuItem(title: "Kies microfoon", action: nil, keyEquivalent: "")
-        micItem.submenu = micMenu
-        menu.addItem(micItem)
-
-        let autoStart = NSMenuItem(
-            title: model.autoStartTitle, action: #selector(toggleAutoStart), keyEquivalent: "")
-        autoStart.target = self
-        autoStart.state = model.autoStartEnabled ? .on : .off
-        menu.addItem(autoStart)
-
-        // Terughaalknop voor de stip: alleen tonen als er een stip gekoppeld is.
-        if listeningIndicator != nil {
-            let recenter = NSMenuItem(
-                title: "Zet luister-stip terug naar het midden",
-                action: #selector(recenterIndicator), keyEquivalent: "")
-            recenter.target = self
-            menu.addItem(recenter)
-        }
-
-        let hotkeySettings = NSMenuItem(
-            title: "Sneltoetsen…", action: #selector(openHotkeySettings), keyEquivalent: "")
-        hotkeySettings.target = self
-        menu.addItem(hotkeySettings)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(
-            title: "Stop pitchlab-speech", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-
-        statusItem.menu = menu
-    }
-
-    @objc private func chooseDevice(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
-              let device = model.devices.first(where: { $0.uniqueID == id }) else { return }
-        selector.select(device)
-        refresh()
-    }
-
-    /// Wisselt de aangeklikte hotkey-toggle — dezelfde `HotkeyStore.toggle` die de
-    /// globale sneltoets aanroept — en hertekent het menu zodat de checkmark en de
-    /// statusbalk de nieuwe stand tonen.
-    @objc private func toggleHotkey(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let action = HotkeyAction(rawValue: raw) else { return }
-        let isOn = hotkeys.toggle(action)
-        refreshHotkeyState()
-        // De hands-free-toggle start/stopt de luister-keten, ook via het menu — niet
-        // alleen via de globale sneltoets. Zonder dit zou een menu-klik enkel de
-        // boolean wisselen (de bug die deze taak wegneemt).
-        if action == .handsFree { onHandsFreeChanged?(isOn) }
-    }
-
-    @objc private func toggleAutoStart() {
-        _ = try? launchAgent.toggle()
-        refresh()
-    }
-
-    @objc private func recenterIndicator() {
-        listeningIndicator?.resetToCenter()
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+            as? String ?? "0.0.0"
+        panel.apply(MenuBarPanelModel(
+            state: model.state,
+            version: version,
+            handsFreeOn: hotkeys.isOn(.handsFree),
+            handsFreeShortcut: hotkeys.combo(for: .handsFree).display,
+            autoEnterOn: hotkeys.isOn(.autoEnter),
+            devices: model.devices,
+            selectedDeviceID: model.selectedDeviceID,
+            fallbackNotice: model.fallbackNotice,
+            errorNotice: model.errorNotice))
     }
 
     @objc private func quit() {
