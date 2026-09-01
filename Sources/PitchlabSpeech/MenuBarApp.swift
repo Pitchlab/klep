@@ -1,15 +1,18 @@
-/// Menubalk-app: statusitem zonder Dock-icoon, een menu dat de staat, de actieve
-/// microfoon en de ingestelde hotkeys toont en microfoonkeuze biedt, plus
-/// auto-start via een LaunchAgent die de app zelf schrijft en verwijdert.
+/// Menubalk-app: statusitem zonder Dock-icoon dat het bedieningspaneel
+/// (`MenuBarPanel.swift`) uit de balk klapt, plus auto-start via een LaunchAgent die
+/// de app zelf schrijft en verwijdert. Het vroegere `NSMenu` is weg — een menu kan
+/// geen schuifregelaar met een zichtbare waarde dragen; de rijen staan nu als gewone
+/// views in een `NSPopover`.
 ///
 /// Twee lagen, gescheiden zodat de logica zonder AppKit-runloop te testen is:
-///  - Pure model-laag (`SpeechState`, `HotkeyToggleRow`, `MenuModel`, `LaunchAgent`,
-///    `LaunchAgentManager`): de menu-teksten, de checkmarks en de LaunchAgent-plist
-///    worden hier bepaald. Geen `NSStatusItem`, geen runloop — direct te testen.
+///  - Pure model-laag (`SpeechState`, `LaunchAgent`, `LaunchAgentManager`): de
+///    statustekst, de LaunchAgent-plist en de opstartstand worden hier bepaald. Geen
+///    `NSStatusItem`, geen runloop — direct te testen. De paneelteksten en -standen
+///    zitten in `MenuBarPanelModel` (`MenuBarPanel.swift`).
 ///  - AppKit-laag (`MenuBarController`, `runMenuBarApp`), onder `#if canImport(AppKit)`:
-///    de lijm die het model op een echte `NSStatusItem` + `NSMenu` tekent en de
-///    acties aan `MicrophoneSelector` en `LaunchAgentManager` hangt. Compileert in
-///    de gate; het echt tonen van een statusitem is een mensentest (PRD).
+///    de lijm die het paneel op een echte `NSStatusItem` + `NSPopover` tekent en de
+///    acties aan `MicrophoneSelector`, `LaunchAgentManager` en de luister-stip hangt.
+///    Compileert in de gate; het echt tonen van een statusitem is een mensentest (PRD).
 ///
 /// Het Dock-icoon blijft weg langs twee kanten: `LSUIElement` in de Info.plist van
 /// de .app (zie `scripts/build-app.sh`) en `setActivationPolicy(.accessory)` in de
@@ -42,108 +45,6 @@ public enum SpeechState: Sendable, Equatable {
         case .listening: return "mic.fill"
         case .transcribing: return "waveform"
         }
-    }
-}
-
-// MARK: - Hotkey-toggles
-
-/// Eén klikbare toggle-regel in het menu: welke actie, of hij aanstaat (voor de
-/// checkmark) en de ingestelde sneltoets die het menu ernaast als hint toont. Puur,
-/// zodat de test de titel, de stand en de hint kan nalopen zonder NSMenu.
-public struct HotkeyToggleRow: Sendable, Equatable {
-    public let action: HotkeyAction
-    /// De leesbare naam van de toggle, bv. "Hands-free".
-    public let title: String
-    /// Of de toggle aanstaat — bepaalt de checkmark.
-    public let isOn: Bool
-    /// De ingestelde sneltoets als leesbare hint, bv. "⌃⌥H".
-    public let shortcut: String
-
-    public init(action: HotkeyAction, title: String, isOn: Bool, shortcut: String) {
-        self.action = action
-        self.title = title
-        self.isOn = isOn
-        self.shortcut = shortcut
-    }
-
-    /// De menutitel: de naam met de sneltoets als hint ernaast. De stand komt van de
-    /// checkmark (`isOn`), niet uit de tekst.
-    public var menuTitle: String { "\(title)  \(shortcut)" }
-}
-
-/// De twee klikbare toggle-regels met hun stand en ingestelde sneltoets uit de
-/// hotkey-store — precies wat er echt geldt. Vervangt de vroegere hardgecodeerde
-/// push-to-talk-regels: geen verzonnen toetsen meer, alleen wat de store draagt.
-public func hotkeyToggleRows(store: HotkeyStore) -> [HotkeyToggleRow] {
-    HotkeyAction.allCases.map { action in
-        HotkeyToggleRow(
-            action: action,
-            title: action.title,
-            isOn: store.isOn(action),
-            shortcut: store.combo(for: action).display)
-    }
-}
-
-// MARK: - Menu-model
-
-/// Het volledige menu als data. Levert per onderdeel de tekst en de checkmarks,
-/// zodat de AppKit-laag alleen nog `NSMenuItem`s hoeft te maken en de tests de
-/// teksten direct kunnen nalopen zonder runloop.
-public struct MenuModel: Sendable, Equatable {
-    public var state: SpeechState
-    /// De naam van de microfoon die nu gebruikt wordt, of nil als er geen is.
-    public var activeMicrophone: String?
-    /// Melding als de gekozen microfoon verdween en de app terugviel (R6), of nil.
-    public var fallbackNotice: String?
-    /// Melding als de tekstuitvoer faalde (bv. ontbrekende Accessibility), of nil.
-    /// Geen stille mislukking: het menu toont dit in de header (R9).
-    public var errorNotice: String?
-    /// De keuzelijst voor de microfoon-submenu.
-    public var devices: [DeviceInfo]
-    /// De id van het gekozen apparaat, voor de checkmark in het submenu.
-    public var selectedDeviceID: String?
-    public var autoStartEnabled: Bool
-
-    public init(
-        state: SpeechState = .idle,
-        activeMicrophone: String? = nil,
-        fallbackNotice: String? = nil,
-        errorNotice: String? = nil,
-        devices: [DeviceInfo] = [],
-        selectedDeviceID: String? = nil,
-        autoStartEnabled: Bool = false
-    ) {
-        self.state = state
-        self.activeMicrophone = activeMicrophone
-        self.fallbackNotice = fallbackNotice
-        self.errorNotice = errorNotice
-        self.devices = devices
-        self.selectedDeviceID = selectedDeviceID
-        self.autoStartEnabled = autoStartEnabled
-    }
-
-    /// De regel die de actieve microfoon toont.
-    public var microphoneLine: String {
-        if let activeMicrophone { return "Microfoon: \(activeMicrophone)" }
-        return "Microfoon: (geen)"
-    }
-
-    /// De titel van de auto-start-schakelaar (de checkmark komt van `autoStartEnabled`).
-    public var autoStartTitle: String { "Start automatisch bij inloggen" }
-
-    /// Het microfoon-submenu als paren titel + of hij aangevinkt is.
-    public func deviceItems() -> [(title: String, isSelected: Bool)] {
-        devices.map { ($0.localizedName, $0.uniqueID == selectedDeviceID) }
-    }
-
-    /// De statische regels van bovenaf, in menuvolgorde: staat, microfoon en
-    /// eventueel de terugval-melding. De hotkey-toggles komen daaronder als eigen
-    /// klikbare items (`hotkeyToggleRows`), niet als tekst hier.
-    public func headerLines() -> [String] {
-        var lines = [state.menuLabel, microphoneLine]
-        if let fallbackNotice { lines.append("⚠︎ \(fallbackNotice)") }
-        if let errorNotice { lines.append("⚠︎ \(errorNotice)") }
-        return lines
     }
 }
 
@@ -272,22 +173,36 @@ import AppKit
 
 // MARK: - AppKit-laag (mensentest)
 
-/// Tekent het `MenuModel` op een echt `NSStatusItem` + `NSMenu` en hangt de acties
-/// aan `MicrophoneSelector` en `LaunchAgentManager`. Runtime niet gedekt door de
-/// unit-tests: een statusitem tonen vraagt een NSApplication-runloop en is een
-/// mensentest. De testbare logica zit in `MenuModel` en `LaunchAgent(Manager)`.
+/// De interne staat die de controller uit microfoon-, hotkey- en foutbronnen
+/// samenstelt en aan het paneel doorgeeft. Geen menu meer: puur de velden die
+/// `MenuBarPanelModel` nodig heeft, dus geen presentatie-teksten hier — die zitten in
+/// `MenuBarPanelModel`.
+private struct ControllerState {
+    var state: SpeechState = .idle
+    var fallbackNotice: String?
+    var errorNotice: String?
+    var devices: [DeviceInfo] = []
+    var selectedDeviceID: String?
+    var autoStartEnabled = false
+}
+
+/// Tekent het bedieningspaneel op een echt `NSStatusItem` + `NSPopover` en hangt de
+/// acties aan `MicrophoneSelector`, `LaunchAgentManager` en de luister-stip. Runtime
+/// niet gedekt door de unit-tests: een statusitem tonen vraagt een NSApplication-
+/// runloop en is een mensentest. De testbare logica zit in `MenuBarPanelModel` en
+/// `LaunchAgent(Manager)`.
 @MainActor
 public final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let selector: MicrophoneSelector
     private let launchAgent: LaunchAgentManager
     /// De persistente stand van de twee globale hotkeys (hands-free, auto-enter),
-    /// zodat het statusitem beide standen toont zonder dat het menu open hoeft.
+    /// zodat het statusitem beide standen toont zonder dat het paneel open hoeft.
     private let hotkeys: HotkeyStore
-    /// De luister-stip, als die er is. Het menu biedt "terug naar het midden" alleen
-    /// als de stip gekoppeld is, zodat een dood item nooit verschijnt.
+    /// De luister-stip, als die er is. Het paneel biedt "terug naar het midden" alleen
+    /// als de stip gekoppeld is, zodat een dood knopje nooit verschijnt.
     private let listeningIndicator: ListeningIndicatorController?
-    private var model: MenuModel
+    private var model = ControllerState()
     /// De laatste uitvoerfout, bewaard los van `model` zodat `refresh()` (die het
     /// model herbouwt uit microfoon + auto-start) de melding niet wist (R9).
     private var errorNotice: String?
@@ -296,9 +211,9 @@ public final class MenuBarController: NSObject {
     /// kan geen schuifregelaar met een zichtbare waarde dragen (zie `MenuBarPanel.swift`).
     private let popover = NSPopover()
     private let panel = MenuBarPanelController()
-    /// Aangeroepen als de hands-free-toggle via het menu wisselt, met de nieuwe stand.
+    /// Aangeroepen als de hands-free-toggle via het paneel wisselt, met de nieuwe stand.
     /// De delegate hangt hier het starten/stoppen van de luister-keten aan, zodat de
-    /// menu-klik dezelfde keten start als de globale sneltoets (niet enkel een boolean).
+    /// paneel-klik dezelfde keten start als de globale sneltoets (niet enkel een boolean).
     public var onHandsFreeChanged: ((Bool) -> Void)?
 
     public init(
@@ -312,7 +227,7 @@ public final class MenuBarController: NSObject {
         self.launchAgent = launchAgent
         self.hotkeys = hotkeys
         self.listeningIndicator = listeningIndicator
-        self.model = MenuModel()
+        self.model = ControllerState()
         super.init()
         configurePopover()
         refresh()
@@ -336,6 +251,21 @@ public final class MenuBarController: NSObject {
             self?.hotkeys.setOn(isOn, for: .autoEnter)
             self?.refreshHotkeyState()
         }
+        // Auto-start om: schrijf/verwijder de LaunchAgent-plist en herbouw het model
+        // uit de nieuwe stand. Een schrijffout landt zichtbaar in de statusregel (R9),
+        // niet stil (PL-691).
+        panel.onToggleAutoStart = { [weak self] isOn in
+            guard let self else { return }
+            do {
+                if isOn { try self.launchAgent.enable() } else { try self.launchAgent.disable() }
+            } catch {
+                self.showError("Auto-start kon niet ingesteld worden.")
+            }
+            self.refresh()
+        }
+        // Terug naar het midden: zet de luister-stip terug (PL-737). Alleen gekoppeld
+        // als er een stip is; de knop verschijnt anders niet (`canRecenter`).
+        panel.onRecenter = { [weak self] in self?.listeningIndicator?.resetToCenter() }
         panel.onSelectDevice = { [weak self] id in
             guard let self,
                   let device = self.model.devices.first(where: { $0.uniqueID == id }) else { return }
@@ -452,12 +382,11 @@ public final class MenuBarController: NSObject {
     }
 
     /// Herbouwt het model uit de huidige microfoon-resolutie en auto-start-stand,
-    /// en tekent het menu opnieuw.
+    /// en tekent het paneel opnieuw.
     public func refresh() {
         let resolution = selector.resolve()
-        model = MenuModel(
+        model = ControllerState(
             state: model.state,
-            activeMicrophone: resolution.device?.localizedName,
             fallbackNotice: resolution.notice?.message,
             errorNotice: errorNotice,
             devices: selector.availableDevices(),
@@ -472,7 +401,7 @@ public final class MenuBarController: NSObject {
         selector.resolve().device
     }
 
-    /// Toont (of wist met nil) een uitvoerfout in de menu-header en tekent opnieuw.
+    /// Toont (of wist met nil) een uitvoerfout in de statusregel en tekent opnieuw.
     /// Geen stille mislukking: een falende TextOutput (bv. ontbrekende Accessibility)
     /// wordt zo zichtbaar (R9).
     public func showError(_ message: String?) {
@@ -502,10 +431,12 @@ public final class MenuBarController: NSObject {
             handsFreeOn: hotkeys.isOn(.handsFree),
             handsFreeShortcut: hotkeys.combo(for: .handsFree).display,
             autoEnterOn: hotkeys.isOn(.autoEnter),
+            autoStartOn: model.autoStartEnabled,
             devices: model.devices,
             selectedDeviceID: model.selectedDeviceID,
             fallbackNotice: model.fallbackNotice,
-            errorNotice: model.errorNotice))
+            errorNotice: model.errorNotice,
+            canRecenter: listeningIndicator != nil))
     }
 
     @objc private func quit() {
@@ -513,9 +444,9 @@ public final class MenuBarController: NSObject {
     }
 }
 
-/// De app-delegate: knoopt de hele keten aaneen. Houdt de menu-controller,
+/// De app-delegate: knoopt de hele keten aaneen. Houdt de paneel-controller,
 /// hotkey-manager, warm-gehouden transcriber en de luister-stip vast, en start/stopt
-/// de hands-free-keten op de toggle (sneltoets én menu). `@MainActor` omdat alle
+/// de hands-free-keten op de toggle (sneltoets én paneel). `@MainActor` omdat alle
 /// AppKit-raakvlakken op de hoofdthread horen; zet de activatiepolicy op `.accessory`
 /// zodat er geen Dock-icoon verschijnt, ook niet bij los starten.
 @MainActor
@@ -556,7 +487,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let launchState = LaunchState(savedAutoEnter: hotkeys.isOn(.autoEnter))
         hotkeys.setOn(launchState.handsFreeOn, for: .handsFree)
         hotkeys.setOn(launchState.autoEnterOn, for: .autoEnter)
-        // Eén stip-controller met de meter die de keten voedt: het menu koppelt hem
+        // Eén stip-controller met de meter die de keten voedt: het paneel koppelt hem
         // voor "terug naar het midden", de keten toont/verbergt hem op luister-staat.
         let meter = AudioLevelMeter()
         let indicator = ListeningIndicatorController(levelSource: meter)
@@ -576,9 +507,9 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             self.controller?.refreshHotkeyState()
             if action == .handsFree { self.setHandsFree(isOn, reason: "sneltoets") }
         }
-        // Dezelfde keten starten/stoppen als de hands-free-toggle via het menu wisselt.
+        // Dezelfde keten starten/stoppen als de hands-free-toggle via het paneel wisselt.
         controller.onHandsFreeChanged = { [weak self] isOn in
-            self?.setHandsFree(isOn, reason: "menu")
+            self?.setHandsFree(isOn, reason: "paneel")
         }
         // Een in het instellingenvenster opnieuw ingestelde combinatie meteen live
         // registreren, zodat de nieuwe sneltoets werkt zonder de app te herstarten.
@@ -604,7 +535,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     /// Hands-free aan: wis een oude fout, toon de luister-staat en draai een verse
     /// keten op het gekozen apparaat. De `HandsFreeController` toont de stip (via de
     /// bridge), warmt het model één keer en stuurt elke uiting naar de uitvoerlaag; een
-    /// uitvoerfout landt in het menu in plaats van stil te falen (R9). Auto-enter wordt
+    /// uitvoerfout landt in het paneel in plaats van stil te falen (R9). Auto-enter wordt
     /// live uit de bewaarde stand gelezen zodat hij mid-sessie aan/uit kan.
     private func startHandsFree() {
         guard session == nil, let controller, let indicator = listeningIndicator,
@@ -629,7 +560,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             }
             let started = await handsFree.run(device: device)
             if !started {
-                // Toestemming geweigerd: de reden staat al in het menu (via onError →
+                // Toestemming geweigerd: de reden staat al in het paneel (via onError →
                 // showError). Zet de toggle terug en ruim de sessie op, anders lijkt
                 // hands-free aan te staan terwijl er niets luistert.
                 await MainActor.run { self?.handsFreeStartDenied() }

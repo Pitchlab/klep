@@ -95,6 +95,32 @@ import Testing
         #expect(MenuBarPanelModel().noticeLines().isEmpty)
     }
 
+    // MARK: - Auto-start bij inloggen (PL-691)
+
+    @Test func autoStartTitleIsStable() {
+        #expect(MenuBarPanelModel().autoStartTitle == "Start automatisch bij inloggen")
+    }
+
+    @Test func autoStartReflectsTheField() {
+        #expect(MenuBarPanelModel(autoStartOn: true).autoStartOn == true)
+        #expect(MenuBarPanelModel(autoStartOn: false).autoStartOn == false)
+        // Standaard uit: los gestart zonder LaunchAgent-plist.
+        #expect(MenuBarPanelModel().autoStartOn == false)
+    }
+
+    // MARK: - Stip terug naar het midden (PL-737)
+
+    @Test func recenterTitleIsStable() {
+        #expect(MenuBarPanelModel().recenterTitle == "Stip naar het midden")
+    }
+
+    @Test func canRecenterReflectsWhetherTheDotIsWired() {
+        // Alleen met een gekoppelde stip biedt het paneel de knop; anders zou hij dood zijn.
+        #expect(MenuBarPanelModel(canRecenter: true).canRecenter == true)
+        #expect(MenuBarPanelModel(canRecenter: false).canRecenter == false)
+        #expect(MenuBarPanelModel().canRecenter == false)
+    }
+
     // MARK: - Voetrij
 
     @Test func footerHasThreeActionsWithHistoryDisabled() {

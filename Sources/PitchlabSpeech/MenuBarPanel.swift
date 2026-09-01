@@ -134,6 +134,9 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// zowel de toetsenchip als de hint onder de toggle.
     public var handsFreeShortcut: String
     public var autoEnterOn: Bool
+    /// Of de app bij inloggen start (de LaunchAgent-plist bestaat). Aan/uit is een
+    /// toggle, dus hij hoort in het paneel — niet in een apart venster (PL-691).
+    public var autoStartOn: Bool
     /// De keuzelijst voor de microfoon-dropdown.
     public var devices: [DeviceInfo]
     /// De id van het gekozen apparaat, voor de selectie in de dropdown.
@@ -143,6 +146,9 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// Melding als de tekstuitvoer faalde (bv. ontbrekende Accessibility), of nil. Geen
     /// stille mislukking: het paneel toont dit onder de statusregel (R9).
     public var errorNotice: String?
+    /// Of de luister-stip gekoppeld is; alleen dan toont de statusregel de
+    /// "terug naar het midden"-knop, zodat een dood knopje nooit verschijnt (PL-737).
+    public var canRecenter: Bool
 
     public init(
         state: SpeechState = .idle,
@@ -150,20 +156,24 @@ public struct MenuBarPanelModel: Sendable, Equatable {
         handsFreeOn: Bool = false,
         handsFreeShortcut: String = "",
         autoEnterOn: Bool = false,
+        autoStartOn: Bool = false,
         devices: [DeviceInfo] = [],
         selectedDeviceID: String? = nil,
         fallbackNotice: String? = nil,
-        errorNotice: String? = nil
+        errorNotice: String? = nil,
+        canRecenter: Bool = false
     ) {
         self.state = state
         self.version = version
         self.handsFreeOn = handsFreeOn
         self.handsFreeShortcut = handsFreeShortcut
         self.autoEnterOn = autoEnterOn
+        self.autoStartOn = autoStartOn
         self.devices = devices
         self.selectedDeviceID = selectedDeviceID
         self.fallbackNotice = fallbackNotice
         self.errorNotice = errorNotice
+        self.canRecenter = canRecenter
     }
 
     /// De statusregel: de stipkleur en de tekst.
@@ -182,6 +192,13 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     public var handsFreeHint: String { "Omschakelen met \(handsFreeShortcut)" }
 
     public var autoEnterTitle: String { "Auto-enter" }
+
+    /// De titel van de auto-start-toggle (de stand komt van `autoStartOn`).
+    public var autoStartTitle: String { "Start automatisch bij inloggen" }
+
+    /// De tekst op de "terug naar het midden"-knop bij de statusregel; ook de
+    /// tooltip/VoiceOver-tekst. Zet de luister-stip terug in het midden (PL-737).
+    public var recenterTitle: String { "Stip naar het midden" }
 
     public var microphoneTitle: String { "Microfoon" }
 
@@ -223,12 +240,22 @@ import AppKit
 // MARK: - AppKit-laag (mensentest)
 
 /// Tekent het `MenuBarPanelModel` als een kolom views in een `NSPopover`. De rijen van
-/// boven naar beneden: statusregel met stip en versie, de alleen-lezen toetsenchip,
-/// hands-free-toggle met hint, een lege plek voor de permissiestatus (PL-729), de
-/// auto-enter-toggle, een lege plek voor de auto-enter-vertraging (PL-746), de
-/// microfoon-dropdown en de voetrij. De twee lege plekken (`permissionSlot`,
+/// boven naar beneden: statusregel met stip, versie en — als de stip gekoppeld is — een
+/// "terug naar het midden"-knop (PL-737), de alleen-lezen toetsenchip, hands-free-toggle
+/// met hint, een lege plek voor de permissiestatus (PL-729), de auto-enter-toggle, een
+/// lege plek voor de auto-enter-vertraging (PL-746), de microfoon-dropdown, de
+/// auto-start-toggle (PL-691) en de voetrij. De twee lege plekken (`permissionSlot`,
 /// `autoEnterDelaySlot`) zijn publieke stackviews zodat PL-729 en PL-746 hun view erin
 /// hangen zonder dit bestand te herbouwen; leeg klappen ze tot nul hoogte in.
+///
+/// PLAATSING van de twee teruggekeerde acties. Auto-start staat als toggle onder de
+/// microfoon en boven de voetrij: het is een aan/uit-voorkeur zoals hands-free en
+/// auto-enter, maar een die je zelden omzet, dus laag in de kolom en niet tussen de
+/// dictaat-toggles. "Terug naar het midden" hoort bij de statusregel, niet in de
+/// voetrij: de knop werkt op de luister-stip, en de statusregel is het echo daarvan;
+/// zo blijft de voetrij de drie navigatie-acties (Instellingen/Geschiedenis/Stoppen)
+/// die de spec vastlegt. De knop verschijnt alleen als de stip gekoppeld is
+/// (`canRecenter`), zodat een dood knopje nooit getekend wordt.
 ///
 /// Runtime niet gedekt door de unit-tests: een paneel tonen vraagt een NSApplication-
 /// runloop en is een mensentest. De testbare logica zit in `MenuBarPanelModel`.
@@ -253,6 +280,10 @@ public final class MenuBarPanelController: NSViewController {
     public var onToggleHandsFree: ((Bool) -> Void)?
     /// Auto-enter omgeschakeld via het paneel, met de nieuwe stand.
     public var onToggleAutoEnter: ((Bool) -> Void)?
+    /// Auto-start (start bij inloggen) omgeschakeld via het paneel, met de nieuwe stand.
+    public var onToggleAutoStart: ((Bool) -> Void)?
+    /// De "terug naar het midden"-knop aangeklikt: zet de luister-stip terug (PL-737).
+    public var onRecenter: (() -> Void)?
     /// Een microfoon gekozen, met de `uniqueID`.
     public var onSelectDevice: ((String) -> Void)?
     /// De toetsenchip aangeklikt: open het sneltoets-instelscherm (PL-733).
@@ -319,6 +350,7 @@ public final class MenuBarPanelController: NSViewController {
         column.addArrangedSubview(makeAutoEnterRow())
         column.addArrangedSubview(autoEnterDelaySlot) // PL-746
         column.addArrangedSubview(makeMicrophoneRow())
+        column.addArrangedSubview(makeAutoStartRow())
         column.addArrangedSubview(makeFooterRow())
     }
 
@@ -333,7 +365,21 @@ public final class MenuBarPanelController: NSViewController {
         let label = Self.label(model.statusIndicator.label)
         let version = Self.label(model.versionLabel)
         version.textColor = .secondaryLabelColor
-        let row = NSStackView(views: [dot, label, NSView(), version])
+        var views: [NSView] = [dot, label, NSView(), version]
+        // Alleen tekenen als de stip gekoppeld is; anders een dood knopje (PL-737).
+        if model.canRecenter {
+            let recenter = NSButton(
+                title: "", target: self, action: #selector(recenterClicked))
+            recenter.bezelStyle = .rounded
+            recenter.controlSize = .small
+            recenter.image = NSImage(
+                systemSymbolName: "scope", accessibilityDescription: model.recenterTitle)
+            recenter.imagePosition = .imageOnly
+            recenter.toolTip = model.recenterTitle
+            recenter.setAccessibilityLabel(model.recenterTitle)
+            views.append(recenter)
+        }
+        let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.spacing = 8
         row.alignment = .centerY
@@ -388,6 +434,19 @@ public final class MenuBarPanelController: NSViewController {
         toggle.target = self
         toggle.action = #selector(autoEnterChanged(_:))
         let title = Self.label(model.autoEnterTitle)
+        let row = NSStackView(views: [title, NSView(), toggle])
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.alignment = .centerY
+        return row
+    }
+
+    private func makeAutoStartRow() -> NSView {
+        let toggle = NSSwitch()
+        toggle.state = model.autoStartOn ? .on : .off
+        toggle.target = self
+        toggle.action = #selector(autoStartChanged(_:))
+        let title = Self.label(model.autoStartTitle)
         let row = NSStackView(views: [title, NSView(), toggle])
         row.orientation = .horizontal
         row.spacing = 8
@@ -452,6 +511,12 @@ public final class MenuBarPanelController: NSViewController {
     @objc private func autoEnterChanged(_ sender: NSSwitch) {
         onToggleAutoEnter?(sender.state == .on)
     }
+
+    @objc private func autoStartChanged(_ sender: NSSwitch) {
+        onToggleAutoStart?(sender.state == .on)
+    }
+
+    @objc private func recenterClicked() { onRecenter?() }
 
     @objc private func microphoneChanged(_ sender: NSPopUpButton) {
         guard let id = sender.selectedItem?.representedObject as? String else { return }
