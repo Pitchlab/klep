@@ -601,6 +601,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             transcriber: transcriber,
             sink: TextOutputSink(),
             indicator: MainActorListeningIndicator(controller: indicator, meter: meter),
+            permission: AVCaptureMicrophonePermission(),
             autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) })
         self.session = handsFree
 

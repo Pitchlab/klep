@@ -125,6 +125,7 @@ enum MenuBarPipelineTestSupport {
             transcriber: transcriber,
             sink: sink,
             indicator: indicator,
+            permission: MicrophonePermissionTestSupport.StubPermission(status: .authorized),
             autoEnter: { autoEnter })
         await controller.run(device: nil)
         return WiringResult(

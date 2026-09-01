@@ -83,7 +83,10 @@ public actor HandsFreeController {
         transcriber: UtteranceTranscribing,
         sink: TranscriptEmitting,
         indicator: ListeningIndicating,
-        permission: MicrophonePermission = AVCaptureMicrophonePermission(),
+        /// Bewust zonder standaardwaarde. Met `= AVCaptureMicrophonePermission()` pakt een
+        /// aanroeper die hem vergeet de echte TCC-status, en dan hangt de uitkomst af van
+        /// wie de tests draait. Zo moet elke aanroeper kiezen.
+        permission: MicrophonePermission,
         autoEnter: @escaping @Sendable () -> Bool
     ) {
         self.audio = audio
