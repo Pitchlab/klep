@@ -51,6 +51,29 @@ public enum TextOutputError: Error, CustomStringConvertible, Equatable {
     }
 }
 
+/// Scheiding tussen twee opeenvolgende uitingen bij de cursor, zodat ze niet aan
+/// elkaar plakken ('eindelijk.En werkt').
+///
+/// BESLIST (Erik, 2026-09-01): eindigt een uiting op een zinseinde (`.` `?` of `!`),
+/// zet er dan ONVOORWAARDELIJK een spatie ACHTER — achteraan, niet vooraan. Reden: de
+/// cursor staat daarna meteen goed om verder te typen, ook als er nooit een tweede
+/// uiting komt. De Nederlandse afkortingspunt ('bijv.') gaat hierin mee — onderscheid
+/// maken kost meer dan het oplevert. Dit is een cursor-keuze (waar staat de cursor),
+/// dus alleen de cursor-route; stdout blijft verbatim (de aanroeper bepaalt de opmaak).
+///
+/// Met auto-enter aan volgt er al een Return achter de uiting; dan géén extra spatie,
+/// anders staat er een spatie vóór de nieuwe regel.
+public enum UtteranceSeparator {
+    /// De tekens die het einde van een zin markeren: punt, vraagteken, uitroepteken.
+    static let sentenceEndings: Set<Character> = [".", "?", "!"]
+
+    /// True als `text` op een zinseinde eindigt.
+    public static func endsSentence(_ text: String) -> Bool {
+        guard let last = text.last else { return false }
+        return sentenceEndings.contains(last)
+    }
+}
+
 /// De toetsaanslag-laag, achter een protocol zodat de invoeg-route te testen is
 /// zonder echte events te posten (Accessibility/TCC — rules-of-engagement §2).
 /// `Sendable` zodat `TextOutput` (en de `TextOutputSink` erboven) over actorgrenzen
@@ -112,6 +135,10 @@ public struct TextOutput: Sendable {
     /// ontbreekt, is de tekst dus al op stdout geschreven vóór de fout. De
     /// cursor-route gooit `TextOutputError.accessibilityNotAuthorized` in plaats
     /// van stil te falen.
+    ///
+    /// Bij de cursor krijgt een uiting die op een zinseinde eindigt een spatie
+    /// achteraan (tenzij `pressReturn`), zodat twee uitingen niet aan elkaar plakken —
+    /// zie `UtteranceSeparator`. Stdout blijft verbatim.
     public func emit(
         _ text: String, to destinations: TextDestinations = .both, pressReturn: Bool = false
     ) throws {
@@ -124,7 +151,13 @@ public struct TextOutput: Sendable {
                 throw TextOutputError.accessibilityNotAuthorized
             }
             try inserter.insert(text)
-            if pressReturn { try inserter.insertReturn() }
+            if pressReturn {
+                try inserter.insertReturn()
+            } else if UtteranceSeparator.endsSentence(text) {
+                // Zinseinde en geen auto-enter: een spatie erachter zodat de volgende
+                // uiting niet aan deze plakt. Zie `UtteranceSeparator`.
+                try inserter.insert(" ")
+            }
         }
     }
 }
