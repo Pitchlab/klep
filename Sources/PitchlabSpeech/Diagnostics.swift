@@ -13,7 +13,7 @@
 ///
 /// De gebeurtenis is een `DiagnosticEvent` — een waarde met een `line`-eigenschap —
 /// zodat de tekst aan de gebeurtenis hangt en niet als losse string door de keten
-/// zwerft. `DiagnosticLog` schrijft naar `~/.pitchlab/klep/klep.log`, naast de config
+/// zwerft. `DiagnosticLog` schrijft naar `~/.pitchlab/klep/klep.log.jsonl`, naast de config
 /// en `sessions.jsonl` van PL-696, en kapt het bestand af zodat het niet volloopt.
 /// De schakel in de keten praat tegen een `DiagnosticSink`; productie injecteert het
 /// echte logbestand, de tests een spy, zodat de gate zonder aanraken van `~/.pitchlab`
@@ -135,7 +135,7 @@ public final class DiagnosticLog: DiagnosticSink, @unchecked Sendable {
     private let lock = NSLock()
 
     /// - Parameters:
-    ///   - fileURL: het logbestand. Standaard `~/.pitchlab/klep/klep.log`.
+    ///   - fileURL: het logbestand. Standaard `~/.pitchlab/klep/klep.log.jsonl`.
     ///   - maxBytes: afkapdrempel; bij overschrijding roteert het bestand één keer.
     ///   - mirrorToStderr: spiegelt elke regel ook naar stderr. Standaard afgeleid van
     ///     de omgeving (`PITCHLAB_SPEECH_DIAG` of `--diagnostics`).
@@ -152,10 +152,13 @@ public final class DiagnosticLog: DiagnosticSink, @unchecked Sendable {
         self.now = now
     }
 
-    /// Het standaard-logpad naast de config van PL-696: `~/.pitchlab/klep/klep.log`.
+    /// Het standaard-logpad naast de config van PL-696: `~/.pitchlab/klep/klep.log.jsonl`.
+    /// De extensie zegt wat erin staat: elke regel is één JSON-record. Het eerdere
+    /// `klep.log` droeg platte tekst; dezelfde naam aanhouden zou een bestaand bestand
+    /// half tekst en half JSON maken, en daar struikelt elke lezer over.
     public static var defaultFileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".pitchlab/klep/klep.log")
+            .appendingPathComponent(".pitchlab/klep/klep.log.jsonl")
     }
 
     /// De rotatiebestemming: hetzelfde pad met `.1` erachter.

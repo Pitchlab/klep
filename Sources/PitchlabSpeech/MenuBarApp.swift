@@ -558,7 +558,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     /// Warm gehouden over sessies heen: het transcriptie-model laadt bij de eerste
     /// keer aanzetten, niet per uiting (koud 0,47 s, warm 0,12 s).
     private let transcriber = WarmTranscriber()
-    /// Het echte logbestand (`~/.pitchlab/klep/klep.log`), gedeeld door de keten en de
+    /// Het echte logbestand (`~/.pitchlab/klep/klep.log.jsonl`), gedeeld door de keten en de
     /// toggle-route zodat de app een spoor achterlaat in plaats van blind te draaien.
     private let diagnostics = DiagnosticLog()
     /// De keten van de huidige luister-sessie plus de taak die hem draait. Vers per

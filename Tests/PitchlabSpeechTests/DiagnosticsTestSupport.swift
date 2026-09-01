@@ -98,7 +98,7 @@ enum DiagnosticsTestSupport {
     static func tempLogURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("klep-test-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("klep.log")
+            .appendingPathComponent("klep.log.jsonl")
     }
 
     /// Logt de gebeurtenissen naar een vers tijdelijk bestand en geeft de inhoud terug.
