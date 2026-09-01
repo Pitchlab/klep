@@ -58,3 +58,16 @@ Bestaat `PitchLab Local Code Signing` nog niet in je login-keychain, dan valt he
 - `Sources/PitchlabSpeech/` — de library. Nu alleen een scaffold-symbool.
 - `Tests/PitchlabSpeechTests/` — Swift Testing smoke-test.
 - `docs/prd.md` — PRD, requirements, spikes.
+
+## Versies
+
+Het versienummer dat de app in zijn paneelkop toont komt uit de laatste git-tag: `scripts/build-app.sh` leest `git describe --tags --abbrev=0` en zet die als `CFBundleShortVersionString`. Zonder tag toont hij `0.0.0`, en dat is het teken dat de build de tag niet zag.
+
+**Tag bij elke merge die iets verandert wat je in de app merkt.** Erik heeft dat op 2026-09-01 vastgelegd met `v0.1.0`, de eerste versie die echt dicteert. Bij een zelfgebouwde app die je meerdere keren per dag herbouwt is "welke draait er nu" een echte vraag, en een versienummer dat blijft staan beantwoordt hem verkeerd.
+
+```bash
+git tag -a v0.2.0 -m "<wat er veranderde>"
+./scripts/build-app.sh          # leest de nieuwe tag
+```
+
+Patch voor een fix, minor voor iets nieuws. Er is nog geen 1.0 en die komt pas als de Definition of Done rond is.
