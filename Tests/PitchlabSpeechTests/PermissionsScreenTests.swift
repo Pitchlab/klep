@@ -15,7 +15,7 @@ import Testing
         let model = PermissionsModel(
             microphoneGranted: true, accessibilityGranted: true, inputMonitoringGranted: true)
         #expect(model.items.map(\.kind) == [.microphone, .accessibility, .inputMonitoring])
-        #expect(model.items.map(\.title) == ["Microfoon", "Toegankelijkheid", "Invoerbewaking"])
+        #expect(model.items.map(\.title) == ["Microfoon", "Tekst-uitvoer", "Sneltoetsen"])
     }
 
     /// Elke permissie zegt wat er zonder werkt en niet werkt — geen lege effect-tekst.
@@ -131,13 +131,38 @@ import Testing
     @Test func bannerNamesTheSingleMissingPermission() {
         let model = PermissionsModel(
             microphoneGranted: true, accessibilityGranted: false, inputMonitoringGranted: true)
-        #expect(model.bannerText == "Toegankelijkheid ontbreekt.")
+        #expect(model.bannerText == "Tekst-uitvoer ontbreekt.")
     }
 
     /// Meerdere ontbrekende permissies staan in de vaste volgorde van de sectie.
     @Test func bannerListsSeveralMissingPermissionsInOrder() {
         let model = PermissionsModel(
             microphoneGranted: false, accessibilityGranted: true, inputMonitoringGranted: false)
-        #expect(model.bannerText == "Ontbreekt: Microfoon, Invoerbewaking.")
+        #expect(model.bannerText == "Ontbreekt: Microfoon, Sneltoetsen.")
+    }
+    // MARK: - De titel zegt waaróm, de systeemnaam waar je hem vindt
+
+    /// De rij-titel noemt het nut, niet de macOS-term: "Toegankelijkheid" zegt niets over
+    /// wat je eraan hebt.
+    @Test func titlesNameThePurpose() {
+        #expect(PermissionKind.microphone.title == "Microfoon")
+        #expect(PermissionKind.accessibility.title == "Tekst-uitvoer")
+        #expect(PermissionKind.inputMonitoring.title == "Sneltoetsen")
+    }
+
+    /// En de macOS-naam blijft bestaan, want zonder die term vind je het vinkje niet
+    /// terug in Systeeminstellingen.
+    @Test func systemNamesStayAvailableForFindingTheSetting() {
+        #expect(PermissionKind.microphone.systemName == "Microfoon")
+        #expect(PermissionKind.accessibility.systemName == "Toegankelijkheid")
+        #expect(PermissionKind.inputMonitoring.systemName == "Invoerbewaking")
+    }
+
+    /// De toelichting noemt de macOS-naam ook, zodat hij in beeld staat zonder dat je
+    /// een tooltip hoeft te openen.
+    @Test func effectTextMentionsTheSystemName() {
+        for kind in PermissionKind.allCases {
+            #expect(kind.effect.contains(kind.systemName))
+        }
     }
 }

@@ -291,8 +291,13 @@ public final class HotkeySettingsWindowController: NSWindowController {
         self.permissionsProbe = permissionsProbe
         self.launchAgent = launchAgent
         self.onRebind = onRebind
+        // Breedte = inhoud + tweemaal dezelfde inset. Stond op 460 met 400 inhoud, dus
+        // links 20 en rechts 40 — dat scheve gat was zichtbaar. De hoogte is een
+        // startwaarde; `sizeToFit()` meet hem daarna aan de echte inhoud.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            contentRect: NSRect(
+                x: 0, y: 0,
+                width: Self.contentWidth + 2 * Self.inset, height: 100),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
@@ -302,7 +307,22 @@ public final class HotkeySettingsWindowController: NSWindowController {
             self?.onOpenPrivacySettings?(kind)
         }
         window.contentView = buildContentView()
+        sizeToFit()
         window.center()
+    }
+
+    /// Meet het venster aan zijn inhoud. Een vaste hoogte klopt hier nooit: het
+    /// permissieblok komt er pas bij als er een probe is, de herstart-hints verschijnen
+    /// alleen zolang een permissie ontbreekt, en de toelichtingen slaan om op een aantal
+    /// regels dat van de tekst afhangt. Aangeroepen na het bouwen én na elke verse
+    /// permissie-render, want dan verandert de hoogte.
+    private func sizeToFit() {
+        guard let window, let content = window.contentView else { return }
+        content.layoutSubtreeIfNeeded()
+        let fitting = content.fittingSize
+        guard fitting.height > 0 else { return }
+        window.setContentSize(
+            NSSize(width: Self.contentWidth + 2 * Self.inset, height: fitting.height))
     }
 
     /// Leest de permissies vers en hertekent het blok. Aangeroepen bij elke keer tonen,
@@ -311,6 +331,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
     public func refreshPermissions() {
         guard let permissionsProbe else { return }
         permissionsSection.render(permissionsProbe.snapshot(), into: permissionSlot)
+        sizeToFit()
     }
 
     public override func showWindow(_ sender: Any?) {
@@ -324,6 +345,8 @@ public final class HotkeySettingsWindowController: NSWindowController {
     /// De vaste breedte van de inhoud. Elke rij krijgt hem, zodat niets meer op zijn
     /// eigen inhoud uitlijnt: dat was de klacht — elk onderdeel een andere breedte.
     static let contentWidth: CGFloat = 400
+    /// De marge rondom, aan alle vier de kanten gelijk.
+    static let inset: CGFloat = 20
 
     private func buildContentView() -> NSView {
         let rows: [NSView] = HotkeyAction.allCases.map { action -> NSView in
@@ -355,7 +378,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
         }
         if permissionsProbe != nil {
             permissionSlot.orientation = .vertical
-            permissionSlot.spacing = 10
+            permissionSlot.spacing = 16
             permissionSlot.alignment = .leading
             permissionSlot.translatesAutoresizingMaskIntoConstraints = false
             permissionSlot.widthAnchor.constraint(
@@ -367,7 +390,8 @@ public final class HotkeySettingsWindowController: NSWindowController {
         stack.orientation = .vertical
         stack.spacing = 12
         stack.alignment = .leading
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+        stack.edgeInsets = NSEdgeInsets(
+            top: Self.inset, left: Self.inset, bottom: Self.inset, right: Self.inset)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()
@@ -394,12 +418,27 @@ public final class HotkeySettingsWindowController: NSWindowController {
     }
 
     /// Toelichting onder een rij: klein en secundair.
+    ///
+    /// Een omslaand label krijgt de inhoudsbreedte OOK als `preferredMaxLayoutWidth`.
+    /// Zonder dat rekent AppKit de hoogte uit op een breedte die het zelf kiest, en dat
+    /// leverde een gat van tientallen punten onder de langste regel — het "enorme gat"
+    /// tussen de eerste en de tweede permissie was dat, geen marge-instelling.
     static func captionLabel(_ text: String, wrapping: Bool = false) -> NSTextField {
         let label = wrapping
             ? NSTextField(wrappingLabelWithString: text)
             : NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = .secondaryLabelColor
+        if wrapping {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.preferredMaxLayoutWidth = contentWidth
+            label.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
+            label.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
+            // Hugging omhoog, anders REKT het label verticaal UIT tot voorbij zijn tekst en
+            // vult het de overgebleven hoogte van de rij. Dat was het gat onder de eerste
+            // permissie: niet extra marge, maar een label dat groter werd dan zijn inhoud.
+            label.setContentHuggingPriority(.required, for: .vertical)
+        }
         return label
     }
 
@@ -420,10 +459,13 @@ public final class HotkeySettingsWindowController: NSWindowController {
         return line
     }
 
-    /// Een horizontale rij op de vaste inhoudsbreedte, met het laatste element rechts.
+    /// Een horizontale rij op de vaste inhoudsbreedte: het eerste element links, al het
+    /// andere rechts tegen elkaar aan. De vuller staat achter het eerste element, niet
+    /// vóór het laatste — anders plakt een statuslabel aan zijn titel en zweeft alleen de
+    /// knop naar rechts.
     static func fullWidthRow(_ views: [NSView]) -> NSView {
         var all = views
-        if all.count > 1 { all.insert(NSView(), at: all.count - 1) }
+        if all.count > 1 { all.insert(NSView(), at: 1) }
         let row = NSStackView(views: all)
         row.orientation = .horizontal
         row.spacing = 10

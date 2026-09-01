@@ -24,8 +24,23 @@ public enum PermissionKind: String, CaseIterable, Sendable, Equatable {
     case accessibility
     case inputMonitoring
 
-    /// De naam zoals macOS de permissie noemt, ook de rij-titel.
+    /// De rij-titel: waarvóór je de permissie wilt, niet hoe macOS hem noemt.
+    ///
+    /// Erik 2026-09-01: "de labels moeten even aangepast naar waarom je het wilt".
+    /// "Toegankelijkheid" en "Invoerbewaking" zeggen niets over wat je eraan hebt;
+    /// "Tekst-uitvoer" en "Sneltoetsen" wel. De macOS-naam blijft nodig om het vinkje
+    /// terug te vinden en staat in `systemName`, dat de rij eronder noemt.
     public var title: String {
+        switch self {
+        case .microphone: return "Microfoon"
+        case .accessibility: return "Tekst-uitvoer"
+        case .inputMonitoring: return "Sneltoetsen"
+        }
+    }
+
+    /// Hoe macOS de permissie noemt in Systeeminstellingen. Zonder dit staat de gebruiker
+    /// voor een lijst waarin "Tekst-uitvoer" niet voorkomt.
+    public var systemName: String {
         switch self {
         case .microphone: return "Microfoon"
         case .accessibility: return "Toegankelijkheid"
@@ -36,9 +51,9 @@ public enum PermissionKind: String, CaseIterable, Sendable, Equatable {
     /// Wat er zonder deze permissie wel en niet werkt — het gevaar is dat de app stil faalt.
     public var effect: String {
         switch self {
-        case .microphone: return "Zonder microfoontoegang neemt de app stilte op zonder te klagen: geen fout, geen transcript."
-        case .accessibility: return "Zonder Toegankelijkheid lukt transcriberen wel, maar typen bij de cursor niet."
-        case .inputMonitoring: return "Zonder Invoerbewaking vuren de globale sneltoetsen niet."
+        case .microphone: return "Zonder dit neemt de app stilte op zonder te klagen: geen fout, geen transcript. Heet \"Microfoon\" in Systeeminstellingen."
+        case .accessibility: return "Zonder dit lukt transcriberen wel, maar typen bij de cursor niet. Heet \"Toegankelijkheid\" in Systeeminstellingen."
+        case .inputMonitoring: return "Zonder dit vuren de globale sneltoetsen niet. Heet \"Invoerbewaking\" in Systeeminstellingen."
         }
     }
 
@@ -233,14 +248,14 @@ public final class PermissionsSectionView {
             slot.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        // Divider vóór en ná het blok, zodat de drie permissies als één groep lezen en
-        // niet doorlopen in wat eromheen staat.
+        // Divider alleen bóven het blok. Eronder staat niets meer, en een lijn onder het
+        // laatste blok scheidt de inhoud van de vensterrand — dat leest als een afgekapte
+        // lijst in plaats van een afgeronde.
         slot.addArrangedSubview(makeDivider())
         slot.addArrangedSubview(makeHeader())
         for item in model.items {
             slot.addArrangedSubview(makeRow(item))
         }
-        slot.addArrangedSubview(makeDivider())
     }
 
     private func makeDivider() -> NSView {
@@ -251,38 +266,36 @@ public final class PermissionsSectionView {
         HotkeySettingsWindowController.sectionHeader("Permissies")
     }
 
-    /// Eén permissie als drie regels op dezelfde breedte: naam links met de status rechts,
-    /// daaronder wat er zonder werkt en de herstart-hint, en een gecentreerde knop.
+    /// Eén permissie als twee regels: naam, status en de tandwielknop op één rij, met
+    /// daaronder wat er zonder werkt en de herstart-hint.
     ///
-    /// Alles loopt door `HotkeySettingsWindowController`'s bouwstenen, zodat dit blok
-    /// dezelfde twee lettergroottes gebruikt als de rest van het venster. Het mengde er
-    /// eerst vijf door elkaar en las daardoor als een verzameling losse dingen.
+    /// De knop droeg eerst het volledige "Open in Systeeminstellingen" op een eigen
+    /// gecentreerde regel. Drie van die regels onder elkaar maakten het blok twee keer zo
+    /// hoog en lieten het als drie losse kaarten lezen; als tandwiel naast de status is
+    /// het één rij per permissie. De tekst blijft als tooltip en als VoiceOver-label, dus
+    /// de betekenis gaat niet verloren met het icoon.
     private func makeRow(_ item: PermissionItem) -> NSView {
         let status = HotkeySettingsWindowController.captionLabel(item.statusLabel)
         if !item.isGranted { status.textColor = .systemOrange }
+
+        let button = NSButton(title: "", target: self, action: #selector(openClicked(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.image = NSImage(
+            systemSymbolName: "gearshape", accessibilityDescription: item.buttonTitle)
+        button.imagePosition = .imageOnly
+        button.toolTip = item.buttonTitle
+        button.setAccessibilityLabel(item.buttonTitle)
+        button.identifier = NSUserInterfaceItemIdentifier(item.kind.rawValue)
+
         let head = HotkeySettingsWindowController.fullWidthRow(
-            [HotkeySettingsWindowController.rowLabel(item.title), status])
+            [HotkeySettingsWindowController.rowLabel(item.title), status, button])
 
         var rows: [NSView] = [head, HotkeySettingsWindowController.captionLabel(
             item.effect, wrapping: true)]
         if let hint = item.restartHint {
             rows.append(HotkeySettingsWindowController.captionLabel(hint, wrapping: true))
         }
-
-        let button = NSButton(
-            title: item.buttonTitle, target: self, action: #selector(openClicked(_:)))
-        button.bezelStyle = .rounded
-        button.controlSize = .small
-        button.identifier = NSUserInterfaceItemIdentifier(item.kind.rawValue)
-        // Gecentreerd, niet links: de knoppen staan onder tekstblokken van verschillende
-        // lengte, en links uitgelijnd leest dat als drie losse rijen in plaats van drie
-        // gelijkwaardige acties.
-        let buttonRow = NSStackView(views: [NSView(), button, NSView()])
-        buttonRow.orientation = .horizontal
-        buttonRow.translatesAutoresizingMaskIntoConstraints = false
-        buttonRow.widthAnchor.constraint(
-            equalToConstant: HotkeySettingsWindowController.contentWidth).isActive = true
-        rows.append(buttonRow)
 
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
@@ -291,6 +304,10 @@ public final class PermissionsSectionView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.widthAnchor.constraint(
             equalToConstant: HotkeySettingsWindowController.contentWidth).isActive = true
+        // Ook de rij zelf mag niet meegroeien met de ruimte die de omringende stack over
+        // heeft; hij is precies zo hoog als zijn drie regels.
+        stack.setContentHuggingPriority(.required, for: .vertical)
+        stack.setHuggingPriority(.required, for: .vertical)
         return stack
     }
 
