@@ -527,6 +527,9 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     /// Warm gehouden over sessies heen: het transcriptie-model laadt bij de eerste
     /// keer aanzetten, niet per uiting (koud 0,47 s, warm 0,12 s).
     private let transcriber = WarmTranscriber()
+    /// Het echte logbestand (`~/.pitchlab/klep/klep.log`), gedeeld door de keten en de
+    /// toggle-route zodat de app een spoor achterlaat in plaats van blind te draaien.
+    private let diagnostics = DiagnosticLog()
     /// De keten van de huidige luister-sessie plus de taak die hem draait. Vers per
     /// hands-free-aan, opgeruimd bij uit; het model blijft warm in `transcriber`.
     private var session: HandsFreeController?
@@ -541,6 +544,10 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
         self.hotkeys = hotkeys
+        // De herstelde hands-free-stand loggen: het menu toont hem, maar hij wordt bij
+        // het opstarten niet toegepast (PL-742). De regel maakt dat verschil zichtbaar
+        // in plaats van het stil te laten.
+        diagnostics.log(.handsFreeRestored(on: hotkeys.isOn(.handsFree)))
         // Eén stip-controller met de meter die de keten voedt: het menu koppelt hem
         // voor "terug naar het midden", de keten toont/verbergt hem op luister-staat.
         let meter = AudioLevelMeter()
@@ -559,11 +566,11 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         manager.onToggle = { [weak self] action, isOn in
             guard let self else { return }
             self.controller?.refreshHotkeyState()
-            if action == .handsFree { self.setHandsFree(isOn) }
+            if action == .handsFree { self.setHandsFree(isOn, reason: "sneltoets") }
         }
         // Dezelfde keten starten/stoppen als de hands-free-toggle via het menu wisselt.
         controller.onHandsFreeChanged = { [weak self] isOn in
-            self?.setHandsFree(isOn)
+            self?.setHandsFree(isOn, reason: "menu")
         }
         // Een in het instellingenvenster opnieuw ingestelde combinatie meteen live
         // registreren, zodat de nieuwe sneltoets werkt zonder de app te herstarten.
@@ -579,8 +586,10 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         self.hotkeyManager = manager
     }
 
-    /// Start of stop hands-free op basis van de nieuwe toggle-stand.
-    private func setHandsFree(_ isOn: Bool) {
+    /// Start of stop hands-free op basis van de nieuwe toggle-stand. `reason` is de
+    /// bron (sneltoets of menu) en landt in de log zodat een aan/uit-flip een spoor heeft.
+    private func setHandsFree(_ isOn: Bool, reason: String) {
+        diagnostics.log(isOn ? .handsFreeOn(reason: reason) : .handsFreeOff(reason: reason))
         if isOn { startHandsFree() } else { stopHandsFree() }
     }
 
@@ -602,6 +611,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             sink: TextOutputSink(),
             indicator: MainActorListeningIndicator(controller: indicator, meter: meter),
             permission: AVCaptureMicrophonePermission(),
+            diagnostics: diagnostics,
             autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) })
         self.session = handsFree
 

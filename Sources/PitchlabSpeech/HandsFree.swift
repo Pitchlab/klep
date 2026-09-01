@@ -68,6 +68,9 @@ public actor HandsFreeController {
     /// Toestemmingslaag: vóór de opname gecontroleerd zodat de app nooit stil op een
     /// geweigerde microfoon draait. Injecteerbaar zodat de suite hem test zonder TCC.
     private let permission: MicrophonePermission
+    /// Diagnostiek: elke schakel in de keten schrijft hier een regel, zodat een stille
+    /// mislukking (geen toestemming, lege transcriptie, uitvoerfout) een spoor achterlaat.
+    private let diagnostics: DiagnosticSink
     /// Live gelezen zodat auto-enter mid-sessie aan/uit kan zonder herstart.
     private let autoEnter: @Sendable () -> Bool
 
@@ -87,6 +90,7 @@ public actor HandsFreeController {
         /// aanroeper die hem vergeet de echte TCC-status, en dan hangt de uitkomst af van
         /// wie de tests draait. Zo moet elke aanroeper kiezen.
         permission: MicrophonePermission,
+        diagnostics: DiagnosticSink = NullDiagnosticSink(),
         autoEnter: @escaping @Sendable () -> Bool
     ) {
         self.audio = audio
@@ -94,6 +98,7 @@ public actor HandsFreeController {
         self.sink = sink
         self.indicator = indicator
         self.permission = permission
+        self.diagnostics = diagnostics
         self.autoEnter = autoEnter
     }
 
@@ -112,11 +117,13 @@ public actor HandsFreeController {
     public func run(device: DeviceInfo?) async -> Bool {
         switch await permission.ensureAccess() {
         case .granted:
-            break
+            diagnostics.log(.permission(kind: "microfoon", status: "toegestaan"))
         case .denied(let reason):
-            report(reason)
+            diagnostics.log(.permission(kind: "microfoon", status: "geweigerd"))
+            report(reason, origin: "microfoontoestemming")
             return false
         }
+        diagnostics.log(.deviceSelected(name: device?.localizedName))
         indicator.show()
         isListening = true
         defer {
@@ -135,7 +142,7 @@ public actor HandsFreeController {
                 }
             }
         } catch {
-            report(error)
+            report(error, origin: "audiobron")
         }
         return true
     }
@@ -146,20 +153,33 @@ public actor HandsFreeController {
     }
 
     private func handle(_ utterance: Utterance) async {
+        diagnostics.log(.utteranceDetected(durationMs: Int(utterance.duration * 1000)))
+        let text: String
         do {
-            let text = try await transcriber.transcribe(utterance)
-            guard !text.isEmpty else { return }
-            try sink.emit(text, autoEnter: autoEnter())
+            let start = Date()
+            text = try await transcriber.transcribe(utterance)
+            let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
+            diagnostics.log(.transcribed(characters: text.count, elapsedMs: elapsedMs))
         } catch {
-            report(error)
+            report(error, origin: "transcriptie")
+            return
+        }
+        guard !text.isEmpty else { return }
+        do {
+            try sink.emit(text, autoEnter: autoEnter())
+            diagnostics.log(.output(route: "cursor+stdout", succeeded: true))
+        } catch {
+            diagnostics.log(.output(route: "cursor+stdout", succeeded: false))
+            report(error, origin: "tekstuitvoer")
         }
     }
 
-    private func report(_ error: Error) {
-        report(String(describing: error))
+    private func report(_ error: Error, origin: String) {
+        report(String(describing: error), origin: origin)
     }
 
-    private func report(_ message: String) {
+    private func report(_ message: String, origin: String) {
+        diagnostics.log(.failure(origin: origin, message: message))
         lastError = message
         onError?(message)
     }
