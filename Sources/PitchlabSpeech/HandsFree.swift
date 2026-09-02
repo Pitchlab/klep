@@ -51,6 +51,9 @@ public protocol UtteranceTranscribing: Sendable {
 /// tekst een Return volgt. Protocol zodat de tests een recorder injecteren.
 public protocol TranscriptEmitting: Sendable {
     func emit(_ text: String, autoEnter: Bool) throws
+    /// De Return, los van de tekst. Apart zodat `AutoEnterDelay` ertussen past; met
+    /// auto-enter uit wordt hij nooit aangeroepen.
+    func emitReturn() throws
 }
 
 // MARK: - Coördinator
@@ -73,6 +76,9 @@ public actor HandsFreeController {
     private let diagnostics: DiagnosticSink
     /// Live gelezen zodat auto-enter mid-sessie aan/uit kan zonder herstart.
     private let autoEnter: @Sendable () -> Bool
+    /// Idem voor de wachttijd vóór de Return: een closure en geen opgeslagen getal,
+    /// zodat de regelaar in het paneel meteen werkt zonder de keten te herstarten.
+    private let autoEnterDelay: @Sendable () -> TimeInterval
 
     /// Draait de keten nu.
     public private(set) var isListening = false
@@ -91,7 +97,8 @@ public actor HandsFreeController {
         /// wie de tests draait. Zo moet elke aanroeper kiezen.
         permission: MicrophonePermission,
         diagnostics: DiagnosticSink = NullDiagnosticSink(),
-        autoEnter: @escaping @Sendable () -> Bool
+        autoEnter: @escaping @Sendable () -> Bool,
+        autoEnterDelay: @escaping @Sendable () -> TimeInterval = { AutoEnterDelay.stored() }
     ) {
         self.audio = audio
         self.transcriber = transcriber
@@ -100,6 +107,7 @@ public actor HandsFreeController {
         self.permission = permission
         self.diagnostics = diagnostics
         self.autoEnter = autoEnter
+        self.autoEnterDelay = autoEnterDelay
     }
 
     public func setOnError(_ handler: (@Sendable (String) -> Void)?) {
@@ -165,11 +173,29 @@ public actor HandsFreeController {
             return
         }
         guard !text.isEmpty else { return }
+        let pressReturn = autoEnter()
         do {
-            try sink.emit(text, autoEnter: autoEnter())
+            try sink.emit(text, autoEnter: pressReturn)
             diagnostics.log(.output(route: "cursor+stdout", succeeded: true))
         } catch {
             diagnostics.log(.output(route: "cursor+stdout", succeeded: false))
+            report(error, origin: "tekstuitvoer")
+            return
+        }
+        guard pressReturn else { return }
+        // De tekst staat er al; de Return wacht. Erik was midden in een zin toen hij
+        // afging, dus deze pauze is het punt van de hele taak. `Task.sleep` en geen
+        // `Thread.sleep`: dit is een actor, en die mag je niet blokkeren.
+        do {
+            try await Task.sleep(nanoseconds: UInt64(autoEnterDelay() * 1_000_000_000))
+        } catch {
+            // Geannuleerd (hands-free uit tijdens het wachten): dan geen Return meer.
+            return
+        }
+        do {
+            try sink.emitReturn()
+        } catch {
+            diagnostics.log(.output(route: "return", succeeded: false))
             report(error, origin: "tekstuitvoer")
         }
     }
@@ -222,6 +248,13 @@ public struct TextOutputSink: TranscriptEmitting {
     }
 
     public func emit(_ text: String, autoEnter: Bool) throws {
-        try output.emit(text, to: destinations, pressReturn: autoEnter)
+        // `pressReturn: false` — de Return volgt apart, na de vertraging. Wel de
+        // scheidingsspatie onderdrukken, anders staat die straks vóór de nieuwe regel.
+        try output.emit(
+            text, to: destinations, pressReturn: false, suppressSeparator: autoEnter)
+    }
+
+    public func emitReturn() throws {
+        try output.emitReturn(to: destinations)
     }
 }

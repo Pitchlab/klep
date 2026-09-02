@@ -186,6 +186,51 @@ public struct Utterance: Sendable, Equatable {
     public var duration: TimeInterval { Double(samples.count) / Double(UtteranceSegmenter.sampleRate) }
 }
 
+/// Hoelang het stil moet zijn voordat een uiting als afgerond geldt.
+///
+/// De VAD knipt hierop: pas na deze stilte gaat het opgenomen stuk naar de
+/// transcriptie. Korter geeft sneller tekst maar meer half afgemaakte zinnen; langer
+/// geeft hele zinnen maar je wacht erop.
+///
+/// DIT IS NIET DE AUTO-ENTER-VERTRAGING. `AutoEnterDelay` bepaalt hoelang ná de tekst
+/// de Return uitblijft. Die twee liepen door elkaar in de klacht die deze taak opriep,
+/// en delen daarom bewust geen waarde en geen sleutel.
+public enum SilenceThreshold {
+    public static let minimum: Double = 0.3
+    public static let maximum: Double = 3.0
+    /// FluidAudio's eigen default, zodat "niets ingesteld" hetzelfde gedrag geeft als
+    /// vóór deze taak.
+    public static let fallback: Double = 0.75
+
+    public static let defaultsKey = "pitchlab.speech.silenceThresholdSeconds"
+
+    public static func clamp(_ seconds: Double) -> Double {
+        min(max(seconds, minimum), maximum)
+    }
+
+    /// De ingestelde waarde, of `fallback`. Via `object(forKey:)` omdat
+    /// `double(forKey:)` een ontbrekende sleutel als 0 teruggeeft, en 0 hier een
+    /// geldig ogende maar verkeerde waarde is.
+    public static func stored(in defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: defaultsKey) != nil else { return fallback }
+        return clamp(defaults.double(forKey: defaultsKey))
+    }
+
+    public static func store(_ seconds: Double, in defaults: UserDefaults = .standard) {
+        defaults.set(clamp(seconds), forKey: defaultsKey)
+    }
+
+    /// FluidAudio's config met de ingestelde stilte erin. De rest blijft de default:
+    /// alleen deze drempel is een gebruikerskeuze.
+    public static func segmentationConfig(
+        in defaults: UserDefaults = .standard
+    ) -> VadSegmentationConfig {
+        var config = VadSegmentationConfig.default
+        config.minSilenceDuration = stored(in: defaults)
+        return config
+    }
+}
+
 /// Bepaalt begin en eind van een uiting met de VAD uit FluidAudio (geen eigen VAD)
 /// en levert per uiting de hele audio als batch — de PRD-default, sneller en
 /// nauwkeuriger dan streaming-transcriptie. Voer willekeurige stukken 16 kHz mono
@@ -209,8 +254,12 @@ public actor UtteranceSegmenter {
     /// - Parameters:
     ///   - preRollSeconds: aanloopje dat vóór een uiting bewaard blijft (R8).
     ///   - segmentationConfig: FluidAudio's drempels; `minSilenceDuration` bepaalt
-    ///     wanneer een uiting als afgerond geldt (PRD open vraag, hier de default).
-    public init(preRollSeconds: Double = 0.3, segmentationConfig: VadSegmentationConfig = .default) {
+    ///     wanneer een uiting als afgerond geldt. Standaard de ingestelde waarde uit
+    ///     `SilenceThreshold`, zodat de regelaar in het paneel echt iets doet.
+    public init(
+        preRollSeconds: Double = 0.3,
+        segmentationConfig: VadSegmentationConfig = SilenceThreshold.segmentationConfig()
+    ) {
         self.segmentationConfig = segmentationConfig
         self.preRoll = PreRollBuffer(seconds: preRollSeconds, sampleRate: Self.sampleRate)
     }

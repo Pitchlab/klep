@@ -57,6 +57,9 @@ enum DiagnosticsTestSupport {
         func emit(_ text: String, autoEnter: Bool) throws {
             if let error { throw error }
         }
+        func emitReturn() throws {
+            if let error { throw error }
+        }
     }
 
     /// Toestemmingsstub: vaste stand, geen echte TCC.

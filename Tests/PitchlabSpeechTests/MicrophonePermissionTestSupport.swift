@@ -58,6 +58,7 @@ enum MicrophonePermissionTestSupport {
 
     struct NoopSink: TranscriptEmitting {
         func emit(_ text: String, autoEnter: Bool) throws {}
+        func emitReturn() throws {}
     }
 
     // MARK: - Driver

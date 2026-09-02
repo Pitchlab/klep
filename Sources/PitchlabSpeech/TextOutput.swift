@@ -74,6 +74,48 @@ public enum UtteranceSeparator {
     }
 }
 
+/// Hoelang de app wacht tussen de ingevoegde tekst en de Return van auto-enter.
+///
+/// WAAROM DIT BESTAAT (Erik, eerste echte gebruik): auto-enter stuurde de Return
+/// meteen achter het transcript aan, midden in een zin. Er zit nu een instelbare
+/// pauze tussen, zodat je kunt doorpraten voordat de regel verstuurd wordt.
+///
+/// DIT IS NIET DE VAD-STILTE. `SilenceThreshold` bepaalt WANNEER een uiting als
+/// afgerond geldt en getranscribeerd wordt; deze waarde bepaalt hoelang daarna de
+/// Return uitblijft. Dicteren in een lopende tekst wil een korte knip en een lange
+/// Return-vertraging, dus de twee staan los van elkaar en delen geen waarde.
+///
+/// Een `enum` zonder cases: puur een namespace met statics. Geen instantie, dus ook
+/// geen Sendable-vraag als de hands-free-actor de waarde opvraagt.
+public enum AutoEnterDelay {
+    /// De ondergrens. Bewust boven nul: op nul is auto-enter terug bij het gedrag
+    /// waar de klacht over ging, en dat moet je niet per ongeluk kunnen instellen.
+    public static let minimum: TimeInterval = 0.2
+    public static let maximum: TimeInterval = 5.0
+    /// De waarde als er nog nooit iets is ingesteld.
+    public static let fallback: TimeInterval = 1.5
+
+    public static let defaultsKey = "pitchlab.speech.autoEnterDelaySeconds"
+
+    /// Houdt een waarde binnen de grenzen. Ook op de leesroute toegepast, zodat een
+    /// met de hand aangepaste plist de app niet buiten zijn bereik zet.
+    public static func clamp(_ seconds: TimeInterval) -> TimeInterval {
+        min(max(seconds, minimum), maximum)
+    }
+
+    /// De ingestelde waarde, of `fallback` als er niets staat. `double(forKey:)` geeft
+    /// 0 voor een ontbrekende sleutel, en 0 is hier een geldige-ogende maar verkeerde
+    /// waarde — vandaar `object(forKey:)` om "niet gezet" te onderscheiden.
+    public static func stored(in defaults: UserDefaults = .standard) -> TimeInterval {
+        guard defaults.object(forKey: defaultsKey) != nil else { return fallback }
+        return clamp(defaults.double(forKey: defaultsKey))
+    }
+
+    public static func store(_ seconds: TimeInterval, in defaults: UserDefaults = .standard) {
+        defaults.set(clamp(seconds), forKey: defaultsKey)
+    }
+}
+
 /// De toetsaanslag-laag, achter een protocol zodat de invoeg-route te testen is
 /// zonder echte events te posten (Accessibility/TCC — rules-of-engagement §2).
 /// `Sendable` zodat `TextOutput` (en de `TextOutputSink` erboven) over actorgrenzen
@@ -139,8 +181,15 @@ public struct TextOutput: Sendable {
     /// Bij de cursor krijgt een uiting die op een zinseinde eindigt een spatie
     /// achteraan (tenzij `pressReturn`), zodat twee uitingen niet aan elkaar plakken —
     /// zie `UtteranceSeparator`. Stdout blijft verbatim.
+    ///
+    /// `suppressSeparator` onderdrukt die spatie zonder zelf een Return te sturen. Dat
+    /// is de auto-enter-route sinds de Return een eigen aanroep werd (`emitReturn`):
+    /// de tekst gaat er nu meteen in, de Return pas na `AutoEnterDelay`. Zonder deze
+    /// vlag zou er in die tussentijd een spatie achter de zin staan die vlak daarna
+    /// vóór de nieuwe regel belandt.
     public func emit(
-        _ text: String, to destinations: TextDestinations = .both, pressReturn: Bool = false
+        _ text: String, to destinations: TextDestinations = .both, pressReturn: Bool = false,
+        suppressSeparator: Bool = false
     ) throws {
         if destinations.contains(.standardOutput) {
             writeStandardOutput(text)
@@ -153,11 +202,28 @@ public struct TextOutput: Sendable {
             try inserter.insert(text)
             if pressReturn {
                 try inserter.insertReturn()
-            } else if UtteranceSeparator.endsSentence(text) {
+            } else if !suppressSeparator && UtteranceSeparator.endsSentence(text) {
                 // Zinseinde en geen auto-enter: een spatie erachter zodat de volgende
                 // uiting niet aan deze plakt. Zie `UtteranceSeparator`.
                 try inserter.insert(" ")
             }
+        }
+    }
+
+    /// Stuurt alleen de Return, los van de tekst.
+    ///
+    /// Bestaat zodat de auto-enter-vertraging ergens kan zitten: de keten voegt de
+    /// tekst in, wacht, en roept dit aan. Zat de Return nog in `emit`, dan kon de
+    /// pauze alleen vóór de tekst of helemaal niet.
+    public func emitReturn(to destinations: TextDestinations = .both) throws {
+        if destinations.contains(.standardOutput) {
+            writeStandardOutput("\n")
+        }
+        if destinations.contains(.cursor) {
+            guard inserter.isAuthorized else {
+                throw TextOutputError.accessibilityNotAuthorized
+            }
+            try inserter.insertReturn()
         }
     }
 }

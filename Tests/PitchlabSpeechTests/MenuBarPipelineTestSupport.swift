@@ -60,6 +60,13 @@ enum MenuBarPipelineTestSupport {
             if let failWith { throw failWith }
             lock.withLock { _calls.append((text, autoEnter)) }
         }
+
+        /// De losse Return (PL-746). Telt als een eigen aanroep met `autoEnter: true`,
+        /// want hij komt alleen op die route voorbij.
+        func emitReturn() throws {
+            if let failWith { throw failWith }
+            lock.withLock { _calls.append(("\n", true)) }
+        }
     }
 
     /// Inserter die de invoegingen én de Returns telt, zonder echte toetsaanslagen
@@ -156,12 +163,19 @@ enum MenuBarPipelineTestSupport {
 
     /// Stuurt één tekst door de echte `TextOutputSink` (cursor + stdout) met een
     /// geïnjecteerde inserter, zodat de Return-vlag op de echte laag te meten is.
-    static func runTextOutputSink(text: String, autoEnter: Bool) throws -> OutputResult {
+    /// - Parameter sendReturn: of de losse `emitReturn` erachteraan gaat. Sinds PL-746
+    ///   zit de Return niet meer in `emit`: de keten voegt de tekst in, wacht de
+    ///   auto-enter-vertraging af, en stuurt hem dan pas. Met `false` zie je de stand
+    ///   halverwege die pauze.
+    static func runTextOutputSink(
+        text: String, autoEnter: Bool, sendReturn: Bool = false
+    ) throws -> OutputResult {
         let inserter = ReturnRecordingInserter(authorized: true)
         let box = StdoutBox()
         let output = TextOutput(inserter: inserter, writeStandardOutput: { box.append($0) })
         let sink = TextOutputSink(output: output, to: .both)
         try sink.emit(text, autoEnter: autoEnter)
+        if sendReturn { try sink.emitReturn() }
         return OutputResult(inserted: inserter.inserted, returns: inserter.returns, stdout: box.value)
     }
 }

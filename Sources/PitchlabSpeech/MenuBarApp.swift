@@ -269,6 +269,11 @@ public final class MenuBarController: NSObject {
             self.selector.select(device)
             self.refresh()
         }
+        // De twee tijdregelaars (PL-746). Meteen wegschrijven naar UserDefaults, want
+        // de keten en de segmenter lezen daar live uit — geen herstart nodig, en de
+        // waarde staat er ook nog na een herstart van de app.
+        panel.onAutoEnterDelayChanged = { seconds in AutoEnterDelay.store(seconds) }
+        panel.onSilenceThresholdChanged = { seconds in SilenceThreshold.store(seconds) }
         panel.onFooterAction = { [weak self] action in
             switch action {
             case .settings: self?.openHotkeySettings()
@@ -489,7 +494,9 @@ public final class MenuBarController: NSObject {
             selectedDeviceID: model.selectedDeviceID,
             fallbackNotice: model.fallbackNotice,
             errorNotice: model.errorNotice,
-            canRecenter: listeningIndicator != nil))
+            canRecenter: listeningIndicator != nil,
+            autoEnterDelaySeconds: AutoEnterDelay.stored(),
+            silenceThresholdSeconds: SilenceThreshold.stored()))
     }
 
     @objc private func quit() {

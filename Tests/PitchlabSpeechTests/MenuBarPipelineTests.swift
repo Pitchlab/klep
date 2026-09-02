@@ -73,9 +73,20 @@ import Testing
         #expect(off.sinkCalls.first?.autoEnter == false)
     }
 
-    /// Op de echte `TextOutput`-laag: een Return komt alleen bij auto-enter aan.
+    /// Op de echte `TextOutput`-laag: een Return komt alleen bij auto-enter aan, en
+    /// pas als de keten hem apart stuurt.
+    ///
+    /// HERZIEN DOOR PL-746: de Return zat in `emit` en gaat nu via `emitReturn`, zodat
+    /// de auto-enter-vertraging ertussen past. Tijdens die pauze staat de tekst er dus
+    /// al zonder Return — dat is de eerste helft hieronder, en precies het gedrag waar
+    /// de taak om begon.
     @Test func returnOnlyWhenAutoEnterOnTheRealOutputLayer() throws {
-        let on = try MenuBarPipelineTestSupport.runTextOutputSink(text: "hoi", autoEnter: true)
+        let waiting = try MenuBarPipelineTestSupport.runTextOutputSink(text: "hoi", autoEnter: true)
+        #expect(waiting.inserted == ["hoi"])
+        #expect(waiting.returns == 0)
+
+        let on = try MenuBarPipelineTestSupport.runTextOutputSink(
+            text: "hoi", autoEnter: true, sendReturn: true)
         #expect(on.inserted == ["hoi"])
         #expect(on.returns == 1)
 
