@@ -80,6 +80,10 @@ public actor HandsFreeController {
     /// zodat de regelaar in het paneel meteen werkt zonder de keten te herstarten.
     private let autoEnterDelay: @Sendable () -> TimeInterval
 
+    /// De Return die nog moet komen, of nil. Eén tegelijk: een nieuwe uiting annuleert
+    /// de vorige, zodat doorpraten de Return opschuift in plaats van hem los te laten.
+    private var pendingReturn: Task<Void, Never>?
+
     /// Draait de keten nu.
     public private(set) var isListening = false
     /// De laatste fout die de uitvoerlaag gaf, of nil. Voor het menu (geen stil falen).
@@ -136,6 +140,9 @@ public actor HandsFreeController {
         isListening = true
         defer {
             isListening = false
+            // Geen Return laten vallen in een venster dat je niet meer verwacht.
+            pendingReturn?.cancel()
+            pendingReturn = nil
             indicator.hide()
         }
         do {
@@ -183,15 +190,32 @@ public actor HandsFreeController {
             return
         }
         guard pressReturn else { return }
-        // De tekst staat er al; de Return wacht. Erik was midden in een zin toen hij
-        // afging, dus deze pauze is het punt van de hele taak. `Task.sleep` en geen
-        // `Thread.sleep`: dit is een actor, en die mag je niet blokkeren.
-        do {
-            try await Task.sleep(nanoseconds: UInt64(autoEnterDelay() * 1_000_000_000))
-        } catch {
-            // Geannuleerd (hands-free uit tijdens het wachten): dan geen Return meer.
-            return
+        scheduleReturn()
+    }
+
+    /// Plant de Return op `autoEnterDelay()` seconden na nu.
+    ///
+    /// EEN LOSSE TAAK EN NIET WACHTEN IN `handle`. De eventlus in `run` verwerkt
+    /// `.level` en `.utterance` serieel; wachtte `handle` op de pauze, dan kwamen er
+    /// intussen geen niveaus meer door en bevroor de luister-stip na elke uiting.
+    ///
+    /// EEN NIEUWE UITING ANNULEERT DE VORIGE RETURN. Dat is de klacht zelf: de Return
+    /// hoort te komen als je UITGEPRAAT bent, niet zoveel seconden na de vorige zin.
+    /// Praat je door, dan schuift hij mee.
+    private func scheduleReturn() {
+        pendingReturn?.cancel()
+        let seconds = autoEnterDelay()
+        pendingReturn = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            } catch {
+                return   // geannuleerd: nieuwe uiting, of hands-free uit
+            }
+            await self?.sendPendingReturn()
         }
+    }
+
+    private func sendPendingReturn() {
         do {
             try sink.emitReturn()
         } catch {

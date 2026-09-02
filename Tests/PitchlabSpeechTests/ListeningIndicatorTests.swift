@@ -41,6 +41,8 @@ import Testing
 
     // MARK: - Niveau → grootte
 
+    /// Met expliciete grenzen, los van de defaults. De defaults zelf staan in
+    /// `IndicatorAppearanceTests` sinds PL-747 ze op 21 en 63 zette.
     @Test func silenceMapsToTheMinimumDiameter() {
         let model = ListeningIndicatorModel(minDiameter: 14, maxDiameter: 42)
         #expect(model.diameter(for: .silent) == 14)

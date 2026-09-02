@@ -185,14 +185,37 @@ public final class UserDefaultsIndicatorPositionStore: IndicatorPositionStore {
 
 // MARK: - Niveau → grootte
 
-/// Vertaalt een audioniveau naar de diameter van de stip. Bij stilte de minimale
-/// grootte (je ziet dát hij luistert), bij luid de maximale (je ziet dat hij je
-/// hóórt). Lineair tussen min en max — geen animatie-logica, alleen de vertaling.
+/// Vertaalt een audioniveau naar de maat en de dekking van de stip.
+///
+/// HERZIEN DOOR PL-747, want hij reageerde te subtiel om iets aan te hebben. Twee
+/// dingen volgen nu het niveau, en één ding juist niet:
+///  - de DIAMETER groeit van 21 naar 63 punt (was 14 tot 42, dus anderhalf keer zo
+///    groot). Groeien was het enige dat al werkte en blijft.
+///  - de VULLINGSDEKKING loopt van 0,25 bij stilte naar 0,75 bij vol niveau. Dat
+///    verving de vaste 0,55 rood: bij stilte zie je dát hij luistert, bij praten dat
+///    hij je hóórt, en het verschil is nu ook zonder meten zichtbaar.
+///  - de OUTLINE niet. Vaste breedte, vaste dekking, ongeacht het niveau — dat is de
+///    rand waaraan je de stip terugvindt op een lichte achtergrond, en die mag niet
+///    mee wegvallen met de vulling.
+///
+/// Geen animatie-logica, alleen de vertaling; de controller pollt op 30 Hz.
 public struct ListeningIndicatorModel: Sendable, Equatable {
     public let minDiameter: Double
     public let maxDiameter: Double
 
-    public init(minDiameter: Double = 14, maxDiameter: Double = 42) {
+    /// De dekking van de vulling bij stilte en bij vol niveau.
+    public static let minFillOpacity: Double = 0.25
+    public static let maxFillOpacity: Double = 0.75
+
+    /// De rand: 2 punt breed op 0,9 dekking, vast. Wit-op-wit is de valkuil hier — een
+    /// witte stip op een licht bureaublad verdwijnt zonder rand, en een rand die met de
+    /// vulling meevervaagt lost hetzelfde probleem niet op. Gemeten keuze: 2 punt is bij
+    /// 21 punt diameter nog een tiende van de breedte, dus zichtbaar zonder de kleinste
+    /// stand dicht te smeren.
+    public static let outlineWidth: Double = 2
+    public static let outlineOpacity: Double = 0.9
+
+    public init(minDiameter: Double = 21, maxDiameter: Double = 63) {
         self.minDiameter = min(minDiameter, maxDiameter)
         self.maxDiameter = max(minDiameter, maxDiameter)
     }
@@ -200,6 +223,12 @@ public struct ListeningIndicatorModel: Sendable, Equatable {
     /// De diameter voor een niveau: `min` bij 0, `max` bij 1, lineair ertussen.
     public func diameter(for level: AudioLevel) -> Double {
         minDiameter + (maxDiameter - minDiameter) * level.value
+    }
+
+    /// De dekking van de vulling voor een niveau, lineair tussen 0,25 en 0,75.
+    public func fillOpacity(for level: AudioLevel) -> Double {
+        Self.minFillOpacity
+            + (Self.maxFillOpacity - Self.minFillOpacity) * level.value
     }
 }
 
@@ -232,15 +261,30 @@ import AppKit
 @MainActor
 final class IndicatorDotView: NSView {
     weak var controller: ListeningIndicatorController?
-    var diameter: CGFloat = 14 { didSet { needsDisplay = true } }
+    var diameter: CGFloat = 21 { didSet { needsDisplay = true } }
+    /// De dekking van de vulling; de outline trekt zich hier niets van aan.
+    var fillOpacity: CGFloat = CGFloat(ListeningIndicatorModel.minFillOpacity) {
+        didSet { needsDisplay = true }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        let d = min(diameter, min(bounds.width, bounds.height))
+        let line = CGFloat(ListeningIndicatorModel.outlineWidth)
+        // De rand wordt op het pad getekend, dus hij steekt een halve lijnbreedte naar
+        // buiten. Daarom die halve breedte van de beschikbare ruimte af, anders knipt
+        // de view de buitenste rand van de grootste stand af.
+        let available = min(bounds.width, bounds.height) - line
+        let d = min(diameter, available)
         let rect = NSRect(
             x: bounds.midX - d / 2, y: bounds.midY - d / 2, width: d, height: d)
         let path = NSBezierPath(ovalIn: rect)
-        NSColor.systemRed.withAlphaComponent(0.55).setFill()
+
+        NSColor.white.withAlphaComponent(fillOpacity).setFill()
         path.fill()
+
+        NSColor.white.withAlphaComponent(CGFloat(ListeningIndicatorModel.outlineOpacity))
+            .setStroke()
+        path.lineWidth = line
+        path.stroke()
     }
 }
 
@@ -264,7 +308,9 @@ public final class ListeningIndicatorController {
     private var isDragging = false
     private var dragOffset: NSPoint = .zero
 
-    private static let panelSize = NSSize(width: 56, height: 56)
+    /// Ruim boven de grootste stip (63 punt) plus de outline, anders klemt `draw` de
+    /// cirkel af en zie je een afgesneden rand op vol niveau.
+    private static let panelSize = NSSize(width: 72, height: 72)
 
     public init(
         levelSource: AudioLevelSource,
@@ -338,7 +384,7 @@ public final class ListeningIndicatorController {
 
     /// Toon de stip en begin het niveau te volgen. Aanroepen zodra luisteren start.
     public func show() {
-        dot.diameter = CGFloat(model.diameter(for: levelSource.currentLevel))
+        apply(levelSource.currentLevel)
         panel.orderFrontRegardless()
         startPolling()
         startFlagsMonitor()
@@ -351,9 +397,15 @@ public final class ListeningIndicatorController {
         panel.orderOut(nil)
     }
 
-    /// Tekent de stip op de grootte die bij `level` hoort (ook los aan te roepen).
+    /// Tekent de stip op de grootte én dekking die bij `level` horen (ook los aan te
+    /// roepen).
     public func update(level: AudioLevel) {
+        apply(level)
+    }
+
+    private func apply(_ level: AudioLevel) {
         dot.diameter = CGFloat(model.diameter(for: level))
+        dot.fillOpacity = CGFloat(model.fillOpacity(for: level))
     }
 
     // MARK: Niveau volgen
