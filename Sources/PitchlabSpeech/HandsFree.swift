@@ -79,6 +79,11 @@ public actor HandsFreeController {
     /// Idem voor de wachttijd vóór de Return: een closure en geen opgeslagen getal,
     /// zodat de regelaar in het paneel meteen werkt zonder de keten te herstarten.
     private let autoEnterDelay: @Sendable () -> TimeInterval
+    /// Dempt de systeemuitvoer zolang de opname loopt (PL-766): speaker-geluid gaat
+    /// anders de microfoon in en wordt meegetranscribeerd. Standaard `NoSystemAudioMuting`
+    /// (uit) zodat de keten ongewijzigd draait; de app injecteert een `SystemAudioMuter`
+    /// als de instelling aan staat. Demp bij de start, herstel bij het stoppen.
+    private let systemAudio: SystemAudioMuting
 
     /// De Return die nog moet komen, of nil. Eén tegelijk: een nieuwe uiting annuleert
     /// de vorige, zodat doorpraten de Return opschuift in plaats van hem los te laten.
@@ -102,7 +107,8 @@ public actor HandsFreeController {
         permission: MicrophonePermission,
         diagnostics: DiagnosticSink = NullDiagnosticSink(),
         autoEnter: @escaping @Sendable () -> Bool,
-        autoEnterDelay: @escaping @Sendable () -> TimeInterval = { AutoEnterDelay.stored() }
+        autoEnterDelay: @escaping @Sendable () -> TimeInterval = { AutoEnterDelay.stored() },
+        systemAudio: SystemAudioMuting = NoSystemAudioMuting()
     ) {
         self.audio = audio
         self.transcriber = transcriber
@@ -112,6 +118,7 @@ public actor HandsFreeController {
         self.diagnostics = diagnostics
         self.autoEnter = autoEnter
         self.autoEnterDelay = autoEnterDelay
+        self.systemAudio = systemAudio
     }
 
     public func setOnError(_ handler: (@Sendable (String) -> Void)?) {
@@ -136,6 +143,10 @@ public actor HandsFreeController {
             return false
         }
         diagnostics.log(.deviceSelected(name: device?.localizedName))
+        // Demp de systeemuitvoer zolang de opname loopt (PL-766). Na de toestemming en
+        // vóór de eerste sample: speaker-geluid gaat anders meteen de microfoon in. De
+        // vorige stand wordt bewaard zodat het herstel klopt (standaard uit: no-op).
+        await systemAudio.muteForRecording()
         indicator.show()
         isListening = true
         defer {
@@ -168,6 +179,11 @@ public actor HandsFreeController {
         } catch {
             report(error, origin: "audiobron")
         }
+        // Herstel de systeemuitvoer naar de bewaarde stand (PL-766). Was hij vóór de
+        // opname al gedempt, dan blijft hij gedempt. Loopt op elke exit ná het dempen,
+        // ook na een audiobronfout. Een crash slaat dit over; dan herstelt de bewaarde
+        // schijf-stand bij de volgende start.
+        await systemAudio.restore()
         return true
     }
 
