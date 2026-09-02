@@ -16,10 +16,20 @@ import AVFoundation
 public struct Pipeline {
     private let transcriber: Transcriber
     private let output: TextOutput
+    private let store: TranscriptStore?
 
-    public init(transcriber: Transcriber = Transcriber(), output: TextOutput = TextOutput()) {
+    /// `store` is optioneel en standaard `nil`: het dicteren is de hoofdtaak, dus een
+    /// ontbrekende geschiedenis-database (open mislukt → `nil`) mag de keten niet
+    /// blokkeren. Is er een store, dan landt elke afgeronde uiting van de live-route
+    /// erin met tekst, tijdstip, duur en modus.
+    public init(
+        transcriber: Transcriber = Transcriber(),
+        output: TextOutput = TextOutput(),
+        store: TranscriptStore? = nil
+    ) {
         self.transcriber = transcriber
         self.output = output
+        self.store = store
     }
 
     /// CLI `--once`: transcribeer één wav-bestand en stuur het transcript naar de
@@ -39,7 +49,9 @@ public struct Pipeline {
     /// Lege transcripties (stilte) worden overgeslagen. Runtime is een mensentest
     /// (mic + Accessibility); de binding zelf compileert in de gate.
     public func run(
-        _ utterances: AsyncStream<Utterance>, to destinations: TextDestinations = .both
+        _ utterances: AsyncStream<Utterance>,
+        to destinations: TextDestinations = .both,
+        mode: String = "hands-free"
     ) async throws {
         for await utterance in utterances {
             let url = try Self.writeTemporaryWav(utterance.samples)
@@ -47,6 +59,9 @@ public struct Pipeline {
             let text = try await transcriber.transcribe(url)
             guard !text.isEmpty else { continue }
             try output.emit(text, to: destinations)
+            // Na een geslaagde invoeging: bewaar de uiting. `record` gooit nooit, dus
+            // een stukke database blokkeert de volgende uiting niet.
+            store?.record(text: text, duration: utterance.duration, mode: mode)
         }
     }
 
