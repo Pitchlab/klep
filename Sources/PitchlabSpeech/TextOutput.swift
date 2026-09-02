@@ -114,6 +114,15 @@ public enum AutoEnterDelay {
     public static func store(_ seconds: TimeInterval, in defaults: UserDefaults = .standard) {
         defaults.set(clamp(seconds), forKey: defaultsKey)
     }
+
+    /// De naam van de rij in het instellingenvenster.
+    public static let settingsTitle = "Wachten voor Return"
+
+    /// De waarde als tekst, door `SpeechFormat.seconds` — dezelfde ene formatter als de
+    /// rest van het venster, zodat er geen `1.50s` naast `1,50s` ontstaat.
+    public static func valueLabel(_ seconds: TimeInterval) -> String {
+        SpeechFormat.seconds(clamp(seconds))
+    }
 }
 
 /// De toetsaanslag-laag, achter een protocol zodat de invoeg-route te testen is

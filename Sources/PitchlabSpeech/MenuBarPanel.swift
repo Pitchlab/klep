@@ -156,13 +156,6 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// "terug naar het midden"-knop, zodat een dood knopje nooit verschijnt (PL-737).
     public var canRecenter: Bool
 
-    /// De wachttijd tussen de ingevoegde tekst en de Return van auto-enter, in
-    /// seconden. Zie `AutoEnterDelay`.
-    public var autoEnterDelaySeconds: Double
-    /// De stilte waarop de VAD een uiting afkapt, in seconden. Zie `SilenceThreshold`.
-    /// Een andere waarde dan hierboven, en bewust een andere regelaar: de een bepaalt
-    /// wanneer je tekst krijgt, de ander wanneer hij verstuurd wordt.
-    public var silenceThresholdSeconds: Double
 
     public init(
         state: SpeechState = .idle,
@@ -176,9 +169,7 @@ public struct MenuBarPanelModel: Sendable, Equatable {
         selectedDeviceID: String? = nil,
         fallbackNotice: String? = nil,
         errorNotice: String? = nil,
-        canRecenter: Bool = false,
-        autoEnterDelaySeconds: Double = AutoEnterDelay.fallback,
-        silenceThresholdSeconds: Double = SilenceThreshold.fallback
+        canRecenter: Bool = false
     ) {
         self.state = state
         self.version = version
@@ -192,8 +183,6 @@ public struct MenuBarPanelModel: Sendable, Equatable {
         self.fallbackNotice = fallbackNotice
         self.errorNotice = errorNotice
         self.canRecenter = canRecenter
-        self.autoEnterDelaySeconds = AutoEnterDelay.clamp(autoEnterDelaySeconds)
-        self.silenceThresholdSeconds = SilenceThreshold.clamp(silenceThresholdSeconds)
     }
 
     /// De statusregel: de stipkleur en de tekst.
@@ -218,19 +207,6 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// een leeg haakjespaar.
     private func label(_ name: String, _ shortcut: String) -> String {
         shortcut.isEmpty ? name : "\(name) (\(shortcut))"
-    }
-
-    /// Het label bij de auto-enter-vertraging, met de waarde erachter zoals
-    /// SpeechButton dat doet — een regelaar zonder afleesbare waarde laat je gokken.
-    /// Door `SpeechFormat.seconds`, de ene formatter die PL-764 hiervoor neerzette.
-    public var autoEnterDelayLabel: String {
-        "Wachten voor Return  \(SpeechFormat.seconds(autoEnterDelaySeconds))"
-    }
-
-    /// Idem voor de VAD-stilte. Andere naam dan hierboven, want het is een andere
-    /// grootheid: dit is wanneer de zin afgekapt wordt, niet wanneer hij verstuurd is.
-    public var silenceThresholdLabel: String {
-        "Stilte voor einde uiting  \(SpeechFormat.seconds(silenceThresholdSeconds))"
     }
 
     /// De tekst op de "terug naar het midden"-knop bij de statusregel; ook de
@@ -305,17 +281,6 @@ public final class MenuBarPanelController: NSViewController {
     /// De vaste breedte van het paneel in punten.
     private static let panelWidth: CGFloat = 300
 
-    /// De plek voor de twee tijdregelaars (PL-746). Blijft één en dezelfde view over
-    /// een `rebuild()` heen — `rebuild` slaat hem bewust over bij het opruimen — zodat
-    /// een sleep-actie niet halverwege onder je vinger vandaan hertekend wordt.
-    public let autoEnterDelaySlot = NSStackView()
-
-    /// De regelaars en hun bijschriften, één keer gemaakt en daarna alleen bijgewerkt.
-    private let autoEnterDelayLabel = MenuBarPanelController.label("")
-    private let autoEnterDelaySlider = NSSlider()
-    private let silenceThresholdLabel = MenuBarPanelController.label("")
-    private let silenceThresholdSlider = NSSlider()
-
     /// De hoofdkolom; bij elke `apply` opnieuw gevuld, met de twee lege plekken op hun
     /// plaats zodat de erin gehangen views een herbouw overleven.
     private let column = NSStackView()
@@ -331,10 +296,6 @@ public final class MenuBarPanelController: NSViewController {
     public var onSelectDevice: ((String) -> Void)?
     /// Een voetknop aangeklikt, met de actie.
     public var onFooterAction: ((PanelAction) -> Void)?
-    /// De auto-enter-vertraging versleept, met de nieuwe waarde in seconden.
-    public var onAutoEnterDelayChanged: ((Double) -> Void)?
-    /// De VAD-stiltedrempel versleept, met de nieuwe waarde in seconden.
-    public var onSilenceThresholdChanged: ((Double) -> Void)?
 
     public init(model: MenuBarPanelModel = MenuBarPanelModel()) {
         self.model = model
@@ -350,11 +311,6 @@ public final class MenuBarPanelController: NSViewController {
         column.spacing = 14
         column.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         column.translatesAutoresizingMaskIntoConstraints = false
-
-        autoEnterDelaySlot.orientation = .vertical
-        autoEnterDelaySlot.alignment = .leading
-        autoEnterDelaySlot.spacing = 6
-        fillDelaySlot()
 
         let container = NSView()
         container.addSubview(column)
@@ -372,10 +328,7 @@ public final class MenuBarPanelController: NSViewController {
     /// Vervangt het model en hertekent het paneel.
     public func apply(_ model: MenuBarPanelModel) {
         self.model = model
-        if isViewLoaded {
-            rebuild()
-            syncDelaySlot()
-        }
+        if isViewLoaded { rebuild() }
     }
 
     // MARK: Opbouw
@@ -383,9 +336,7 @@ public final class MenuBarPanelController: NSViewController {
     private func rebuild() {
         for view in column.arrangedSubviews {
             column.removeArrangedSubview(view)
-            if view !== autoEnterDelaySlot {
-                view.removeFromSuperview()
-            }
+            view.removeFromSuperview()
         }
 
         column.addArrangedSubview(makeStatusRow())
@@ -399,7 +350,6 @@ public final class MenuBarPanelController: NSViewController {
         column.addArrangedSubview(makeMicrophoneRow())
         column.addArrangedSubview(makeHandsFreeRow())
         column.addArrangedSubview(makeAutoEnterRow())
-        column.addArrangedSubview(autoEnterDelaySlot) // PL-746
         column.addArrangedSubview(makeDivider())
         column.addArrangedSubview(makeFooterRow())
     }
@@ -573,69 +523,6 @@ public final class MenuBarPanelController: NSViewController {
     }
 
     // MARK: Hulp
-
-    // MARK: Tijdregelaars (PL-746)
-
-    /// Bouwt de twee regelaars één keer op in de bestaande `autoEnterDelaySlot`.
-    ///
-    /// Twee losse regelaars en niet één: de VAD-stilte bepaalt wanneer je tekst
-    /// krijgt, de auto-enter-vertraging wanneer die verstuurd wordt. Ze deelden geen
-    /// waarde en dat moet in de bediening ook zo te zien zijn — dicteren in een
-    /// lopende tekst wil een korte knip en een lange Return-vertraging.
-    private func fillDelaySlot() {
-        autoEnterDelayLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        silenceThresholdLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-
-        configure(
-            autoEnterDelaySlider, minimum: AutoEnterDelay.minimum, maximum: AutoEnterDelay.maximum,
-            action: #selector(autoEnterDelayChanged(_:)))
-        configure(
-            silenceThresholdSlider, minimum: SilenceThreshold.minimum,
-            maximum: SilenceThreshold.maximum, action: #selector(silenceThresholdChanged(_:)))
-
-        for view in [autoEnterDelayLabel, autoEnterDelaySlider,
-                     silenceThresholdLabel, silenceThresholdSlider] as [NSView] {
-            autoEnterDelaySlot.addArrangedSubview(view)
-        }
-        syncDelaySlot()
-    }
-
-    private func configure(
-        _ slider: NSSlider, minimum: Double, maximum: Double, action: Selector
-    ) {
-        slider.minValue = minimum
-        slider.maxValue = maximum
-        slider.target = self
-        slider.action = action
-        // Doorlopend, zodat het bijschrift meeloopt tijdens het slepen in plaats van
-        // pas bij loslaten te verspringen.
-        slider.isContinuous = true
-        slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.widthAnchor.constraint(equalToConstant: Self.panelWidth - 28).isActive = true
-    }
-
-    /// Zet de standen en bijschriften gelijk aan het model. Apart van `fillDelaySlot`
-    /// omdat `apply` dit bij elke hertekening doet en de views dan al bestaan.
-    private func syncDelaySlot() {
-        autoEnterDelaySlider.doubleValue = model.autoEnterDelaySeconds
-        silenceThresholdSlider.doubleValue = model.silenceThresholdSeconds
-        autoEnterDelayLabel.stringValue = model.autoEnterDelayLabel
-        silenceThresholdLabel.stringValue = model.silenceThresholdLabel
-    }
-
-    @objc private func autoEnterDelayChanged(_ sender: NSSlider) {
-        let seconds = AutoEnterDelay.clamp(sender.doubleValue)
-        model.autoEnterDelaySeconds = seconds
-        autoEnterDelayLabel.stringValue = model.autoEnterDelayLabel
-        onAutoEnterDelayChanged?(seconds)
-    }
-
-    @objc private func silenceThresholdChanged(_ sender: NSSlider) {
-        let seconds = SilenceThreshold.clamp(sender.doubleValue)
-        model.silenceThresholdSeconds = seconds
-        silenceThresholdLabel.stringValue = model.silenceThresholdLabel
-        onSilenceThresholdChanged?(seconds)
-    }
 
     private static func label(_ text: String) -> NSTextField {
         let field = NSTextField(labelWithString: text)

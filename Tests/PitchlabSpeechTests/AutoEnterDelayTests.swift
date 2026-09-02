@@ -8,8 +8,9 @@ import Testing
 /// waarden zijn — de VAD-stilte die een uiting afkapt, en de wachttijd vóór de
 /// Return — en dat de Return niet meer aan de tekst vastzit.
 ///
-/// Het paneel zelf (`MenuBarPanelController`) vraagt een runloop en is een mensentest
-/// (ROE §2); hier staat de logica eromheen. Foundation-werk staat in
+/// De regelaars staan in het instellingenvenster (Erik, 2026-09-02), niet in het
+/// menubalk-paneel zoals de taak eerst zei. Dat venster vraagt een runloop en is een
+/// mensentest (ROE §2); hier staat de logica eromheen. Foundation-werk staat in
 /// `AutoEnterDelayTestSupport`, want `import Testing` + `import Foundation` in één
 /// bestand breekt op de CLT-only toolchain.
 @Suite struct AutoEnterDelayTests {
@@ -82,10 +83,17 @@ import Testing
 
     // MARK: Het paneel draagt de waarden
 
-    @Test func panelModelCarriesAndClampsBothValues() {
-        let model = MenuBarPanelModel(autoEnterDelaySeconds: 99, silenceThresholdSeconds: 0)
-        #expect(model.autoEnterDelaySeconds == AutoEnterDelay.maximum)
-        #expect(model.silenceThresholdSeconds == SilenceThreshold.minimum)
+    /// De waardelabels klemmen ook, zodat een met de hand aangepaste plist niet als
+    /// `9,00s` in het venster verschijnt terwijl de keten 5,00s gebruikt.
+    @Test func valueLabelsClampLikeTheStoredValue() {
+        #expect(AutoEnterDelay.valueLabel(99) == SpeechFormat.seconds(AutoEnterDelay.maximum))
+        #expect(SilenceThreshold.valueLabel(0) == SpeechFormat.seconds(SilenceThreshold.minimum))
+    }
+
+    /// De twee rijen in het instellingenvenster heten niet hetzelfde. Ze zijn allebei
+    /// een tijd in seconden, en dezelfde naam zou ze weer op één hoop gooien.
+    @Test func theTwoSettingsRowsHaveDistinctNames() {
+        #expect(AutoEnterDelay.settingsTitle != SilenceThreshold.settingsTitle)
     }
 
     /// Beide regelaars lopen door `SpeechFormat.seconds`, de ene formatter die PL-764
@@ -93,9 +101,8 @@ import Testing
     /// paneel en `1,00s` in het venster omdat daar twee formatters staan; een tweede
     /// formatter erbij zetten zou die fout hier importeren.
     @Test func bothLabelsUseTheOneFormatter() {
-        let model = MenuBarPanelModel(autoEnterDelaySeconds: 1.5, silenceThresholdSeconds: 1.5)
-        #expect(model.autoEnterDelayLabel.hasSuffix(SpeechFormat.seconds(1.5)))
-        #expect(model.silenceThresholdLabel.hasSuffix(SpeechFormat.seconds(1.5)))
+        #expect(AutoEnterDelay.valueLabel(1.5) == SpeechFormat.seconds(1.5))
+        #expect(SilenceThreshold.valueLabel(1.5) == SpeechFormat.seconds(1.5))
         // Vaste nl_NL-notatie: komma, twee decimalen. Beweegt niet met de systeemtaal.
         #expect(SpeechFormat.seconds(1.5) == "1,50s")
     }

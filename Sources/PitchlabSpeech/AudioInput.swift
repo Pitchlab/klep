@@ -220,6 +220,15 @@ public enum SilenceThreshold {
         defaults.set(clamp(seconds), forKey: defaultsKey)
     }
 
+    /// De naam van de rij in het instellingenvenster. Andere grootheid dan
+    /// `AutoEnterDelay.settingsTitle`, dus bewust een andere naam: dit is wanneer de
+    /// zin afgekapt wordt, niet wanneer hij verstuurd is.
+    public static let settingsTitle = "Stilte voor einde uiting"
+
+    public static func valueLabel(_ seconds: Double) -> String {
+        SpeechFormat.seconds(clamp(seconds))
+    }
+
     /// FluidAudio's config met de ingestelde stilte erin. De rest blijft de default:
     /// alleen deze drempel is een gebruikerskeuze.
     public static func segmentationConfig(

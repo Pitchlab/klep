@@ -275,6 +275,13 @@ public final class HotkeySettingsWindowController: NSWindowController {
     /// Aangeroepen als een permissieknop geklikt wordt. Dit venster opent zelf niets.
     public var onOpenPrivacySettings: ((PermissionKind) -> Void)?
 
+    /// De twee tijdregelaars en hun waardelabels (PL-746). Opgeslagen omdat het label
+    /// tijdens het slepen moet meelopen; verder gedragen ze zich als elke andere rij.
+    private let autoEnterDelaySlider = NSSlider()
+    private let autoEnterDelayValue = HotkeySettingsWindowController.captionLabel("")
+    private let silenceThresholdSlider = NSSlider()
+    private let silenceThresholdValue = HotkeySettingsWindowController.captionLabel("")
+
     /// Leest en zet de auto-start-stand; `nil` betekent geen auto-start-rij.
     private let launchAgent: LaunchAgentManager?
     /// Gemeld als het schrijven van de LaunchAgent-plist faalt, zodat de aanroeper het
@@ -371,6 +378,9 @@ public final class HotkeySettingsWindowController: NSWindowController {
 
         var sections: [NSView] = [Self.sectionHeader("Sneltoetsen")]
         sections.append(contentsOf: rows)
+        sections.append(Self.divider())
+        sections.append(Self.sectionHeader("Tijden"))
+        sections.append(contentsOf: makeTimingRows())
         if launchAgent != nil {
             sections.append(Self.divider())
             sections.append(Self.sectionHeader("Opstarten"))
@@ -473,6 +483,67 @@ public final class HotkeySettingsWindowController: NSWindowController {
         row.translatesAutoresizingMaskIntoConstraints = false
         row.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
         return row
+    }
+
+    /// De twee tijdrijen (PL-746): hoelang de Return uitblijft na de tekst, en hoeveel
+    /// stilte een uiting afkapt.
+    ///
+    /// Dezelfde driedeling als een sneltoetsrij — naam links, bediening van 150 punt,
+    /// een klein element rechts — zodat dit als hetzelfde raster leest en niet als een
+    /// aangeplakt blok. Geen toelichtingsregel eronder: de namen zeggen het verschil al,
+    /// en een caption per rij is precies wat dit scherm eerder vol maakte.
+    private func makeTimingRows() -> [NSView] {
+        [
+            makeTimingRow(
+                title: AutoEnterDelay.settingsTitle, slider: autoEnterDelaySlider,
+                value: autoEnterDelayValue, minimum: AutoEnterDelay.minimum,
+                maximum: AutoEnterDelay.maximum, current: AutoEnterDelay.stored(),
+                label: AutoEnterDelay.valueLabel, action: #selector(autoEnterDelayChanged(_:))),
+            makeTimingRow(
+                title: SilenceThreshold.settingsTitle, slider: silenceThresholdSlider,
+                value: silenceThresholdValue, minimum: SilenceThreshold.minimum,
+                maximum: SilenceThreshold.maximum, current: SilenceThreshold.stored(),
+                label: SilenceThreshold.valueLabel,
+                action: #selector(silenceThresholdChanged(_:))),
+        ]
+    }
+
+    private func makeTimingRow(
+        title: String, slider: NSSlider, value: NSTextField, minimum: Double, maximum: Double,
+        current: Double, label: (Double) -> String, action: Selector
+    ) -> NSView {
+        let name = Self.rowLabel(title)
+        name.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        slider.minValue = minimum
+        slider.maxValue = maximum
+        slider.doubleValue = current
+        slider.target = self
+        slider.action = action
+        // Doorlopend, zodat het getal meeloopt tijdens het slepen in plaats van pas bij
+        // loslaten te verspringen.
+        slider.isContinuous = true
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        value.stringValue = label(current)
+        value.alignment = .right
+        value.translatesAutoresizingMaskIntoConstraints = false
+        // Vaste breedte: anders verschuift de regelaar terwijl je sleept, omdat `1,00s`
+        // smaller is dan `0,75s` in een proportioneel lettertype.
+        value.widthAnchor.constraint(equalToConstant: 46).isActive = true
+
+        return Self.fullWidthRow([name, slider, value])
+    }
+
+    @objc private func autoEnterDelayChanged(_ sender: NSSlider) {
+        AutoEnterDelay.store(sender.doubleValue)
+        autoEnterDelayValue.stringValue = AutoEnterDelay.valueLabel(sender.doubleValue)
+    }
+
+    @objc private func silenceThresholdChanged(_ sender: NSSlider) {
+        SilenceThreshold.store(sender.doubleValue)
+        silenceThresholdValue.stringValue = SilenceThreshold.valueLabel(sender.doubleValue)
     }
 
     /// Start-bij-inloggen. Stond tot PL-788 in het menubalk-paneel; het is een voorkeur die
