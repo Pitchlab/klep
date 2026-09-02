@@ -89,6 +89,13 @@ import Testing
         #expect(!kept.contains("oud"))
     }
 
+    /// De geschiedenis moet zeggen WAAR een transcript heen ging. De cursorroute is de
+    /// standaard; `--listen` typt nergens in en heet daarom `stdout`.
+    @Test func theHistoryRouteDistinguishesCursorFromStdout() {
+        #expect(TextOutputSink().historyRoute == "cursor")
+        #expect(StandardOutputLineSink().historyRoute == "stdout")
+    }
+
     /// Opruimen op een lege database is geen fout — dat is de stand bij de allereerste
     /// start, en die mag het openen niet laten struikelen.
     @Test func pruneOnAnEmptyDatabaseIsHarmless() {

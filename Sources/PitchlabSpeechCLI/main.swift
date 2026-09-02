@@ -66,7 +66,11 @@ case .on:
         sink: StandardOutputLineSink(),
         indicator: SilentListeningIndicator(),
         permission: AVCaptureMicrophonePermission(),
-        autoEnter: { autoEnter })
+        autoEnter: { autoEnter },
+        // Ook deze route bewaart (PL-757). `--listen` is dicteren, geen bestand
+        // omzetten: `mode` legt vast dat het transcript naar stdout ging en niet naar
+        // de cursor. `--once` blijft bewust ongestoord — dat zet een bestand om.
+        store: TranscriptStore.open())
 
     // Geen stil falen: een keten-fout (bv. audiobron kon niet starten) landt op stderr
     // in plaats van in het menu-paneel.

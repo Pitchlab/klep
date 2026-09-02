@@ -54,6 +54,14 @@ public protocol TranscriptEmitting: Sendable {
     /// De Return, los van de tekst. Apart zodat `AutoEnterDelay` ertussen past; met
     /// auto-enter uit wordt hij nooit aangeroepen.
     func emitReturn() throws
+    /// Hoe deze bestemming in de geschiedenis heet (PL-757 wil weten waar het
+    /// transcript heen ging: naar de cursor of naar stdout).
+    var historyRoute: String { get }
+}
+
+public extension TranscriptEmitting {
+    /// De cursorroute is de gewone: alleen de CLI wijkt af.
+    var historyRoute: String { "cursor" }
 }
 
 // MARK: - Coördinator
@@ -224,12 +232,18 @@ public actor HandsFreeController {
         // Bewaren gebeurt NA de geslaagde uitvoer: wat nooit bij de cursor kwam hoort
         // ook niet in de geschiedenis. `mode` legt vast of auto-enter aanstond, want
         // dat verklaart later waarom er wel of geen Return achter zat.
-        store?.record(
-            text: text, duration: utterance.duration,
-            mode: pressReturn ? "hands-free+auto-enter" : "hands-free")
+        store?.record(text: text, duration: utterance.duration, mode: mode(pressReturn))
 
         guard pressReturn else { return }
         scheduleReturn()
+    }
+
+    /// De modus zoals hij in de geschiedenis landt: waar het transcript heen ging en
+    /// of auto-enter aanstond. Genoeg om later te zien waarom er wel of geen Return
+    /// achter zat, en of het een menubalk- of CLI-sessie was.
+    private func mode(_ autoEnterOn: Bool) -> String {
+        let route = sink.historyRoute
+        return autoEnterOn ? "\(route)+auto-enter" : route
     }
 
     /// Plant de Return op `autoEnterDelay()` seconden na nu.

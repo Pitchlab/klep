@@ -182,6 +182,10 @@ public struct StandardOutputLineSink: TranscriptEmitting {
     public func emitReturn() throws {
         write("\n")
     }
+
+    /// In de geschiedenis heet deze route `stdout`, niet `cursor` — `--listen` typt
+    /// nergens in, het schrijft regels weg.
+    public var historyRoute: String { "stdout" }
 }
 
 /// `--listen`-modus: zet de gedeelde hands-free-stand en draait — als hij aan gaat —
