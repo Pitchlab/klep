@@ -45,6 +45,10 @@ public enum DiagnosticEvent: Sendable, Equatable {
     case deviceSelected(name: String?)
     /// De toestemmingsstatus per soort, vóór de opname (PL-740: geen stille stilte).
     case permission(kind: String, status: String)
+    /// De tijd tussen "hands-free aan" en de eerste binnengekomen sample (PL-765).
+    /// Meet wat je aan het begin van je eerste woord kwijt bent doordat de
+    /// `AVCaptureSession` nog opgezet moest worden.
+    case captureReady(elapsedMs: Int)
     /// Een afgeronde uiting gedetecteerd, met de duur in milliseconden.
     case utteranceDetected(durationMs: Int)
     /// Een uiting getranscribeerd: aantal tekens (geen inhoud) en verstreken tijd.
@@ -73,6 +77,8 @@ public enum DiagnosticEvent: Sendable, Equatable {
             return "apparaat gekozen: \(name ?? "(systeemstandaard)")"
         case .permission(let kind, let status):
             return "permissie \(kind): \(status)"
+        case .captureReady(let elapsedMs):
+            return "eerste sample \(elapsedMs) ms na hands-free aan"
         case .utteranceDetected(let durationMs):
             return "uiting gedetecteerd, duur \(durationMs) ms"
         case .transcribed(let characters, let elapsedMs):
@@ -93,6 +99,7 @@ public enum DiagnosticEvent: Sendable, Equatable {
         case .handsFreeRestored: return "hands_free_restored"
         case .deviceSelected: return "device_selected"
         case .permission: return "permission"
+        case .captureReady: return "capture_ready"
         case .utteranceDetected: return "utterance_detected"
         case .transcribed: return "transcribed"
         case .output: return "output"
@@ -274,6 +281,8 @@ private struct DiagnosticRecord: Encodable {
         case .permission(let kind, let status):
             try c.encode(kind, forKey: .kind)
             try c.encode(status, forKey: .status)
+        case .captureReady(let elapsedMs):
+            try c.encode(elapsedMs, forKey: .elapsedMs)
         case .utteranceDetected(let durationMs):
             try c.encode(durationMs, forKey: .durationMs)
         case .transcribed(let characters, let elapsedMs):

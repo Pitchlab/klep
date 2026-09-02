@@ -147,10 +147,19 @@ public actor HandsFreeController {
         }
         do {
             try await transcriber.warmUp()
+            // PL-765 meet dit: de tijd tot de eerste sample is wat je aan het begin
+            // van je eerste woord kwijt bent doordat de opnamesessie nog opgezet werd.
+            let startedAt = Date()
+            var firstSampleSeen = false
             let events = try audio.start(device: device)
             for await event in events {
                 switch event {
                 case .level(let level):
+                    if !firstSampleSeen {
+                        firstSampleSeen = true
+                        diagnostics.log(.captureReady(
+                            elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1000)))
+                    }
                     indicator.update(level: level)
                 case .utterance(let utterance):
                     await handle(utterance)

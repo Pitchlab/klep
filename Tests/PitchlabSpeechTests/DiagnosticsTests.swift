@@ -135,19 +135,25 @@ import Testing
     // MARK: - Keten (bedrading in HandsFreeController)
 
     /// Een toegestane run door één uiting logt de hele keten in volgorde: permissie,
-    /// apparaat, uiting met duur, transcript-lengte, en gelukte uitvoer.
+    /// apparaat, de eerste sample, uiting met duur, transcript-lengte, en gelukte
+    /// uitvoer.
     @Test func chainLogsFullSequenceOnSuccess() async {
         let events = await DiagnosticsTestSupport.chainEvents(transcript: "hallo daar")
-        #expect(events.count == 5)
+        #expect(events.count == 6)
         #expect(events[0] == .permission(kind: "microfoon", status: "toegestaan"))
         #expect(events[1] == .deviceSelected(name: nil))
-        #expect(events[2] == .utteranceDetected(durationMs: 200))
-        if case .transcribed(let characters, _) = events[3] {
+        // PL-765: de tijd tot de eerste sample. De waarde is een meting en dus niet te
+        // pinnen; dát hij er staat, en vóór de eerste uiting, is wat hier telt.
+        if case .captureReady = events[2] {} else {
+            Issue.record("verwachtte capture_ready, kreeg \(events[2])")
+        }
+        #expect(events[3] == .utteranceDetected(durationMs: 200))
+        if case .transcribed(let characters, _) = events[4] {
             #expect(characters == 10)
         } else {
-            Issue.record("verwachtte een transcribed-gebeurtenis, kreeg \(events[3])")
+            Issue.record("verwachtte een transcribed-gebeurtenis, kreeg \(events[4])")
         }
-        #expect(events[4] == .output(route: "cursor+stdout", succeeded: true))
+        #expect(events[5] == .output(route: "cursor+stdout", succeeded: true))
     }
 
     /// Een falende uitvoer valt luid: de mislukt-route en de fout met zijn plek staan
