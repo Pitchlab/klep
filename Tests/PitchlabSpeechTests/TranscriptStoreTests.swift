@@ -70,3 +70,28 @@ import Testing
         #expect(try store.recentTranscripts().count == 2)
     }
 }
+
+/// Aanvullingen na Eriks drie beslissingen van 2026-09-02: opslaan standaard aan,
+/// 30 dagen bewaren, nog niet versleutelen.
+@Suite struct TranscriptRetentionTests {
+
+    /// De termijn staat op 30 dagen, de waarde die Erik koos.
+    @Test func retentionIsThirtyDays() {
+        #expect(TranscriptStore.retentionDays == 30)
+    }
+
+    /// Opruimen gooit weg wat ouder is dan de termijn en laat de rest staan. De grens
+    /// zelf hoort te blijven: precies 30 dagen oud is nog binnen de termijn.
+    @Test func pruneDropsOnlyWhatIsOlderThanTheTerm() {
+        let kept = TranscriptRetentionTestSupport.pruneAtBoundary()
+        #expect(kept.contains("vers"))
+        #expect(kept.contains("grens"))
+        #expect(!kept.contains("oud"))
+    }
+
+    /// Opruimen op een lege database is geen fout — dat is de stand bij de allereerste
+    /// start, en die mag het openen niet laten struikelen.
+    @Test func pruneOnAnEmptyDatabaseIsHarmless() {
+        #expect(TranscriptRetentionTestSupport.pruneEmptyLeavesNothing())
+    }
+}

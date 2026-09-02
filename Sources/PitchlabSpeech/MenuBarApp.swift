@@ -613,7 +613,11 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             indicator: MainActorListeningIndicator(controller: indicator, meter: meter),
             permission: AVCaptureMicrophonePermission(),
             diagnostics: diagnostics,
-            autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) })
+            autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) },
+            // Opslaan staat standaard aan (Erik, 2026-09-02). `open` ruimt meteen op wat
+            // ouder is dan 30 dagen en geeft nil bij een kapotte database — dan dicteer
+            // je door zonder geschiedenis in plaats van niet te dicteren.
+            store: TranscriptStore.open())
         self.session = handsFree
 
         runTask = Task { [weak self, weak controller] in

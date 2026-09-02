@@ -51,7 +51,11 @@ public struct TranscriptRecord: Sendable, Equatable {
     public var recordedAtEpoch: TimeInterval { recordedAt.timeIntervalSince1970 }
 }
 
-public final class TranscriptStore {
+/// `@unchecked Sendable` op grond van `SQLITE_OPEN_FULLMUTEX` hieronder: SQLite
+/// serialiseert die verbinding zelf, dus meerdere threads mogen hem tegelijk gebruiken.
+/// De hands-free-keten draait in een actor en schrijft hiernaartoe; zonder deze
+/// conformance kan de store die grens niet over.
+public final class TranscriptStore: @unchecked Sendable {
     private let db: OpaquePointer
     private let log: @Sendable (String) -> Void
 
@@ -133,7 +137,10 @@ public final class TranscriptStore {
     ) -> TranscriptStore? {
         do {
             let target = try url ?? defaultDatabaseURL()
-            return try TranscriptStore(url: target, log: log)
+            let store = try TranscriptStore(url: target, log: log)
+            // Opruimen bij het openen: één keer per sessie, buiten het dicteerpad om.
+            store.prune()
+            return store
         } catch {
             log("transcriptdatabase openen mislukt: \(error)")
             return nil
@@ -161,6 +168,30 @@ public final class TranscriptStore {
         log: @escaping @Sendable (String) -> Void = TranscriptStore.defaultLog
     ) -> TranscriptStore? {
         open(path: ":memory:", log: log)
+    }
+
+    /// Hoelang een uiting bewaard blijft. BESLIST door Erik op 2026-09-02: 30 dagen,
+    /// opslaan standaard aan, nog niet versleutelen — de rechten op de homedir volstaan
+    /// voorlopig. Alles wat je zegt komt op schijf, dus dit is de rem daarop.
+    public static let retentionDays = 30
+
+    /// Gooit alles weg dat ouder is dan `days` dagen. Draait bij het openen, dus één
+    /// keer per sessie en niet op het dicteerpad. Gooit nooit: lukt het opruimen niet,
+    /// dan gaat dat naar de log en werkt de rest gewoon.
+    public func prune(olderThan days: Int = TranscriptStore.retentionDays, now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-Double(days) * 24 * 60 * 60).timeIntervalSince1970
+        let sql = "DELETE FROM transcripts WHERE recorded_at < ?;"
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            log("opruimen mislukt (prepare): \(String(cString: sqlite3_errmsg(db)))")
+            return
+        }
+        sqlite3_bind_double(statement, 1, cutoff)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            log("opruimen mislukt (step): \(String(cString: sqlite3_errmsg(db)))")
+            return
+        }
     }
 
     /// Bewaart één afgeronde uiting. Gooit nooit: mislukt de insert, dan gaat de

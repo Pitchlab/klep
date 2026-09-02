@@ -85,6 +85,11 @@ public actor HandsFreeController {
     /// als de instelling aan staat. Demp bij de start, herstel bij het stoppen.
     private let systemAudio: SystemAudioMuting
 
+    /// Waar afgeronde uitingen bewaard worden, of nil (geen geschiedenis). PL-757:
+    /// het dicteren is de hoofdtaak, dus een ontbrekende of kapotte database mag het
+    /// invoegen nooit blokkeren — `record` gooit daarom niet en `nil` is geldig.
+    private let store: TranscriptStore?
+
     /// De Return die nog moet komen, of nil. Eén tegelijk: een nieuwe uiting annuleert
     /// de vorige, zodat doorpraten de Return opschuift in plaats van hem los te laten.
     private var pendingReturn: Task<Void, Never>?
@@ -108,7 +113,8 @@ public actor HandsFreeController {
         diagnostics: DiagnosticSink = NullDiagnosticSink(),
         autoEnter: @escaping @Sendable () -> Bool,
         autoEnterDelay: @escaping @Sendable () -> TimeInterval = { AutoEnterDelay.stored() },
-        systemAudio: SystemAudioMuting = NoSystemAudioMuting()
+        systemAudio: SystemAudioMuting = NoSystemAudioMuting(),
+        store: TranscriptStore? = nil
     ) {
         self.audio = audio
         self.transcriber = transcriber
@@ -119,6 +125,7 @@ public actor HandsFreeController {
         self.autoEnter = autoEnter
         self.autoEnterDelay = autoEnterDelay
         self.systemAudio = systemAudio
+        self.store = store
     }
 
     public func setOnError(_ handler: (@Sendable (String) -> Void)?) {
@@ -214,6 +221,13 @@ public actor HandsFreeController {
             report(error, origin: "tekstuitvoer")
             return
         }
+        // Bewaren gebeurt NA de geslaagde uitvoer: wat nooit bij de cursor kwam hoort
+        // ook niet in de geschiedenis. `mode` legt vast of auto-enter aanstond, want
+        // dat verklaart later waarom er wel of geen Return achter zat.
+        store?.record(
+            text: text, duration: utterance.duration,
+            mode: pressReturn ? "hands-free+auto-enter" : "hands-free")
+
         guard pressReturn else { return }
         scheduleReturn()
     }
