@@ -125,6 +125,30 @@ public struct LaunchAgentManager {
         }
     }
 
+    /// Het label dat de app droeg vóór de hernoeming naar Klep (PL-731).
+    public static let legacyLabel = "nl.pitchlab.speech"
+
+    /// Ruimt de LaunchAgent van de oude naam op.
+    ///
+    /// De hernoeming veranderde het label, dus `enable()` schrijft voortaan
+    /// `nl.pitchlab.klep.plist`. De oude plist blijft daarnaast staan en wijst naar een
+    /// bundel-id die niet meer bestaat; launchd probeert hem bij elke login te starten en
+    /// faalt stil. PL-731 noemt dit met zoveel woorden als de valkuil van een halve
+    /// hernoeming.
+    ///
+    /// De auto-start-stand gaat mee over: stond de oude aan, dan staat de nieuwe aan.
+    /// Anders verliest iemand die auto-start had zijn instelling zonder melding. Gooit
+    /// niet — dit draait bij het opstarten en mag de app nooit tegenhouden. Geeft terug
+    /// of er iets opgeruimd is.
+    @discardableResult
+    public func removeLegacyAgent(label: String = LaunchAgentManager.legacyLabel) -> Bool {
+        let legacy = directory.appendingPathComponent("\(label).plist")
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return false }
+        try? FileManager.default.removeItem(at: legacy)
+        if !isEnabled() { try? enable() }
+        return true
+    }
+
     /// Schakelt auto-start om en geeft de nieuwe stand terug.
     @discardableResult
     public func toggle() throws -> Bool {
@@ -567,6 +591,11 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         // toggle, en de hands-free-toggle de keten laten starten/stoppen. Ontbreekt
         // Input Monitoring, dan zet `start()` een expliciete melding klaar in plaats
         // van stil te falen (spec PL-704).
+        // De LaunchAgent van vóór de hernoeming opruimen (PL-731). Bij het opstarten,
+        // want dat is het eerste moment waarop de nieuwe bundel draait; laat je hem
+        // staan, dan start launchd bij elke login een bundel die niet meer bestaat.
+        launchAgent.removeLegacyAgent()
+
         let manager = GlobalHotkeyManager(store: hotkeys)
         manager.onToggle = { [weak self] action, isOn in
             guard let self else { return }

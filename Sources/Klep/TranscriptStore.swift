@@ -106,16 +106,48 @@ public final class TranscriptStore: @unchecked Sendable {
     /// query-plan (`prunePlanDescription`) gegarandeerd dezelfde query zijn.
     private static let pruneSQL = "DELETE FROM transcripts WHERE recorded_at < ?;"
 
+    /// De naam die de map droeg vóór de hernoeming naar Klep (PL-731).
+    public static let legacyDirectoryName = "PitchlabSpeech"
+    public static let directoryName = "Klep"
+
     /// De vaste locatie in Application Support. Bewust buiten de app-bundel, zodat een
     /// herbouw de geschiedenis niet wist. De map wordt met de juiste rechten (0700)
     /// aangemaakt in `init`; hier alleen het pad.
+    ///
+    /// Verhuist onderweg de map van vóór de hernoeming. Zonder die stap leest de app uit
+    /// een verse map terwijl je geschiedenis in de oude staat — leeg scherm, data nog op
+    /// schijf, en niemand die het verband legt.
     public static func defaultDatabaseURL() throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true)
+        migrateLegacyDirectory(in: support)
         return support
-            .appendingPathComponent("Klep", isDirectory: true)
+            .appendingPathComponent(directoryName, isDirectory: true)
             .appendingPathComponent("transcripts.sqlite3", isDirectory: false)
+    }
+
+    /// Hernoemt `PitchlabSpeech` naar `Klep` als de oude map er is en de nieuwe nog niet.
+    ///
+    /// Alleen dán: bestaan ze allebei, dan is de nieuwe al in gebruik en zou verhuizen
+    /// verse rijen overschrijven met oude. In dat geval blijft de oude map staan en is
+    /// hij met de hand terug te vinden — vervelender dan automatisch, maar niets kwijt.
+    /// Gooit niet: dit draait op het pad naar het dicteren en mag dat nooit blokkeren.
+    /// Geeft terug of er verhuisd is.
+    @discardableResult
+    static func migrateLegacyDirectory(in support: URL) -> Bool {
+        let fm = FileManager.default
+        let old = support.appendingPathComponent(legacyDirectoryName, isDirectory: true)
+        let new = support.appendingPathComponent(directoryName, isDirectory: true)
+        guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: new.path) else {
+            return false
+        }
+        do {
+            try fm.moveItem(at: old, to: new)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Het standaardpad als string, zonder mappen aan te maken. Zo kan de gate
@@ -125,7 +157,7 @@ public final class TranscriptStore: @unchecked Sendable {
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: false)
         return support
-            .appendingPathComponent("Klep", isDirectory: true)
+            .appendingPathComponent(directoryName, isDirectory: true)
             .appendingPathComponent("transcripts.sqlite3", isDirectory: false)
             .path
     }
