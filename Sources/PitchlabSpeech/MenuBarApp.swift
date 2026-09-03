@@ -272,7 +272,7 @@ public final class MenuBarController: NSObject {
         panel.onFooterAction = { [weak self] action in
             switch action {
             case .settings: self?.openHotkeySettings()
-            case .history: break   // uit tot PL-757 de inhoud levert
+            case .history: self?.openHistory()
             case .quit: self?.quit()
             }
         }
@@ -490,6 +490,19 @@ public final class MenuBarController: NSObject {
             fallbackNotice: model.fallbackNotice,
             errorNotice: model.errorNotice,
             canRecenter: listeningIndicator != nil))
+    }
+
+    /// Opent het geschiedenisvenster (PL-757). De store gaat pas open als je hem
+    /// opvraagt, en blijft daarna bestaan zolang het venster leeft. Lukt openen niet —
+    /// een kapotte database — dan gebeurt er niets zichtbaars behalve een regel in de
+    /// log; het dicteren mag hier nooit onder lijden.
+    private var historyWindow: HistoryWindowController?
+
+    private func openHistory() {
+        if historyWindow == nil, let store = TranscriptStore.open() {
+            historyWindow = HistoryWindowController(store: store)
+        }
+        historyWindow?.showWindow(nil)
     }
 
     @objc private func quit() {

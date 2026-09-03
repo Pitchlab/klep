@@ -215,6 +215,41 @@ public final class TranscriptStore: @unchecked Sendable {
         }
     }
 
+    /// Zoekt op woord in de tekst, nieuwste eerst. Doorzoeken is de reden dat we
+    /// opslaan; een lege zoekterm geeft de recente lijst terug.
+    ///
+    /// `LIKE` en geen FTS5: bij een bewaartermijn van 30 dagen blijft de tabel klein
+    /// genoeg dat een scan onmerkbaar is, en FTS5 kost een tweede tabel die synchroon
+    /// moet blijven. Loopt de termijn ooit op, dan is dit de plek om FTS5 te zetten.
+    public func search(_ term: String, limit: Int = 100) throws -> [TranscriptRecord] {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return try recentTranscripts(limit: limit) }
+
+        let sql = """
+            SELECT id, text, recorded_at, duration, mode FROM transcripts
+            WHERE text LIKE ? ESCAPE '\\' ORDER BY recorded_at DESC LIMIT ?;
+            """
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw StoreError.query(String(cString: sqlite3_errmsg(db)))
+        }
+        // De jokertekens van LIKE ontsnappen, anders is een getypte % een zoek-alles.
+        let escaped = trimmed
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        sqlite3_bind_text(statement, 1, "%\(escaped)%", -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 2, Int32(limit))
+        return try rows(from: statement)
+    }
+
+    /// Gooit de hele geschiedenis weg. De gebruiker moet dit kunnen: alles wat je zegt
+    /// staat op schijf, dus er hoort een knop te zijn die het leegmaakt.
+    public func deleteAll() throws {
+        try exec("DELETE FROM transcripts;")
+    }
+
     /// De laatst bewaarde uitingen, nieuwste eerst. Voor het terugzoeken van de
     /// geschiedenis en voor de gate. Gooit bij een leesfout — anders dan het
     /// dicteerpad is dit geen hete route.
@@ -226,17 +261,23 @@ public final class TranscriptStore: @unchecked Sendable {
             throw StoreError.query(String(cString: sqlite3_errmsg(db)))
         }
         sqlite3_bind_int(statement, 1, Int32(limit))
-        var rows: [TranscriptRecord] = []
+        return try rows(from: statement)
+    }
+
+    /// Leest de rijen uit een voorbereide query. Eén decoder voor de recente lijst en
+    /// voor het zoeken, zodat de kolomvolgorde op één plek staat.
+    private func rows(from statement: OpaquePointer?) throws -> [TranscriptRecord] {
+        var result: [TranscriptRecord] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             let id = sqlite3_column_int64(statement, 0)
             let text = String(cString: sqlite3_column_text(statement, 1))
             let recordedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
             let duration = sqlite3_column_double(statement, 3)
             let mode = String(cString: sqlite3_column_text(statement, 4))
-            rows.append(TranscriptRecord(
+            result.append(TranscriptRecord(
                 id: id, text: text, recordedAt: recordedAt, duration: duration, mode: mode))
         }
-        return rows
+        return result
     }
 
     private func exec(_ sql: String) throws {

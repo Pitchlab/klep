@@ -237,18 +237,15 @@ public struct MenuBarPanelModel: Sendable, Equatable {
         return lines
     }
 
-    /// De drie voetknoppen: Instellingen, Geschiedenis (uit tot PL-757), Stoppen.
+    /// De drie voetknoppen: Instellingen, Geschiedenis, Stoppen. Alle drie aanklikbaar
+    /// sinds PL-757 de geschiedenis vult; de knop stond uit zolang er niets te zien was.
     public func footerButtons() -> [FooterButton] {
         [
             FooterButton(action: .settings, isEnabled: true),
-            FooterButton(action: .history, isEnabled: false, disabledHint: Self.historyHint),
+            FooterButton(action: .history, isEnabled: true),
             FooterButton(action: .quit, isEnabled: true),
         ]
     }
-
-    /// Waarom Geschiedenis uit staat. Een knop die niets doet zonder uitleg leest als
-    /// kapot; deze tekst hangt eraan als tooltip tot PL-757 hem inhoud geeft.
-    public static let historyHint = "Nog geen geschiedenis — transcripten worden nog niet bewaard."
 }
 
 #if canImport(AppKit)

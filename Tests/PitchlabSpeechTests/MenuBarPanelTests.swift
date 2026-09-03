@@ -111,19 +111,21 @@ import Testing
         #expect(model.permissionBanner == "Toegankelijkheid ontbreekt.")
     }
 
-    // MARK: - Geschiedenis zegt waarom hij uit staat
+    // MARK: - Geschiedenis
 
-    /// Een knop die niets doet zonder uitleg leest als kapot.
-    @Test func disabledHistoryCarriesAHint() {
+    /// Sinds PL-757 de geschiedenis vult, is de knop aanklikbaar en draagt hij geen
+    /// uitleg meer waarom hij uit staat. Die tooltip zei "worden nog niet bewaard" en
+    /// dat was onwaar geworden.
+    @Test func historyIsReachable() {
         let history = MenuBarPanelModel().footerButtons().first { $0.action == .history }
-        #expect(history?.isEnabled == false)
-        #expect(history?.disabledHint == MenuBarPanelModel.historyHint)
+        #expect(history?.isEnabled == true)
+        #expect(history?.disabledHint == nil)
     }
 
-    @Test func enabledFooterButtonsCarryNoHint() {
-        let enabled = MenuBarPanelModel().footerButtons().filter(\.isEnabled)
-        #expect(enabled.count == 2)
-        #expect(enabled.allSatisfy { $0.disabledHint == nil })
+    @Test func everyFooterButtonIsEnabledAndCarriesNoHint() {
+        let buttons = MenuBarPanelModel().footerButtons()
+        #expect(buttons.allSatisfy { $0.isEnabled })
+        #expect(buttons.allSatisfy { $0.disabledHint == nil })
     }
 
     // MARK: - Stip terug naar het midden (PL-737)
@@ -141,13 +143,11 @@ import Testing
 
     // MARK: - Voetrij
 
-    @Test func footerHasThreeActionsWithHistoryDisabled() {
+    @Test func footerHasThreeUsableActions() {
         let buttons = MenuBarPanelModel().footerButtons()
         #expect(buttons.map(\.action) == [.settings, .history, .quit])
         #expect(buttons.map(\.title) == ["Instellingen", "Geschiedenis", "Stoppen"])
-        // Geschiedenis staat uit tot PL-757 de inhoud levert.
-        let history = buttons.first { $0.action == .history }
-        #expect(history?.isEnabled == false)
+        #expect(buttons.first { $0.action == .history }?.isEnabled == true)
         #expect(buttons.first { $0.action == .settings }?.isEnabled == true)
         #expect(buttons.first { $0.action == .quit }?.isEnabled == true)
     }
