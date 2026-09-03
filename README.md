@@ -1,4 +1,4 @@
-# pitchlab-speech
+# Klep
 
 Lokale dicteer-app voor macOS (Apple Silicon), vervanger van SpeechButton. Spraak → tekst bij de cursor, aangestuurd vanaf het toetsenbord, STT lokaal via Parakeet (FluidAudio/CoreML). Geen server, geen cloud, geen account. Scope en requirements: `docs/prd.md`.
 
@@ -34,8 +34,8 @@ De runtime-rpath naar dat pad zit in `Package.swift` (op het test-target). `make
 ## Installeren
 
 ```
-./scripts/build-app.sh                    # bouwt en signeert .build/PitchlabSpeech.app
-cp -R .build/PitchlabSpeech.app /Applications/
+./scripts/build-app.sh                    # bouwt en signeert .build/Klep.app
+cp -R .build/Klep.app /Applications/
 ```
 
 Eerste keer starten vraagt macOS om Microfoon, Toegankelijkheid en Invoerbewaking. Geef die één keer via Systeeminstellingen → Privacy en beveiliging.
@@ -44,7 +44,7 @@ Eerste keer starten vraagt macOS om Microfoon, Toegankelijkheid en Invoerbewakin
 
 macOS TCC koppelt die toestemmingen aan de *designated requirement* van de app-code, niet aan het pad. Bij **ad-hoc** signeren (identiteit `-`) is die requirement de exacte CDHash, en die verandert bij elke build — dus elke herinstallatie is voor macOS een nieuwe app en je moet Microfoon, Toegankelijkheid en Invoerbewaking opnieuw geven.
 
-`build-app.sh` signeert daarom met een **stabiele self-signed identiteit** uit de keychain (standaard `PitchLab Local Code Signing`). Dan is de requirement `identifier "nl.pitchlab.speech" and certificate root = H"…"` — gelijk over builds zolang bundle-id en certificaat gelijk blijven. De CDHash verandert nog steeds per build, maar de toestemming blijft geldig. Het script meldt na afloop de CDHash, of die veranderd is, en of je iets opnieuw moet geven.
+`build-app.sh` signeert daarom met een **stabiele self-signed identiteit** uit de keychain (standaard `PitchLab Local Code Signing`). Dan is de requirement `identifier "nl.pitchlab.klep" and certificate root = H"…"` — gelijk over builds zolang bundle-id en certificaat gelijk blijven. De CDHash verandert nog steeds per build, maar de toestemming blijft geldig. Het script meldt na afloop de CDHash, of die veranderd is, en of je iets opnieuw moet geven.
 
 Een echte Developer ID zou hetzelfde geven zonder handmatige keychain-stap, maar die is er niet en is buiten scope; self-signed is de minste wrijving voor lokaal gebruik.
 
@@ -54,9 +54,9 @@ Bestaat `PitchLab Local Code Signing` nog niet in je login-keychain, dan valt he
 
 ## Structuur
 
-- `Package.swift` — SwiftPM-manifest, target `PitchlabSpeech` (library) + `PitchlabSpeechTests`.
-- `Sources/PitchlabSpeech/` — de library. Nu alleen een scaffold-symbool.
-- `Tests/PitchlabSpeechTests/` — Swift Testing smoke-test.
+- `Package.swift` — SwiftPM-manifest, target `Klep` (library) + `KlepTests`.
+- `Sources/Klep/` — de library. Nu alleen een scaffold-symbool.
+- `Tests/KlepTests/` — Swift Testing smoke-test.
 - `docs/prd.md` — PRD, requirements, spikes.
 
 ## Versies

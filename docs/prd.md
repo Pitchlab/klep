@@ -1,10 +1,10 @@
-# PRD — pitchlab-speech
+# PRD — Klep
 
 Status: draft. Branch `feat/speech`. Owner: Erik. HQ: `pitchlab/pitchlab-speech`, doel `PL-689`.
 
 ## Waarom
 
-SpeechButton is de dicteer-app die in gebruik was: push-to-talk, hotkey vasthouden, tekst verschijnt bij de cursor, hands-free modus met auto-enter na stilte. Hun server is down, dus de app is niet meer te installeren of te heractiveren. `pitchlab-speech` is de vervanger, volledig lokaal en zonder server die uit kan vallen — geen licentie-check, geen cloud-STT, geen account.
+SpeechButton is de dicteer-app die in gebruik was: push-to-talk, hotkey vasthouden, tekst verschijnt bij de cursor, hands-free modus met auto-enter na stilte. Hun server is down, dus de app is niet meer te installeren of te heractiveren. Klep is de vervanger, volledig lokaal en zonder server die uit kan vallen — geen licentie-check, geen cloud-STT, geen account.
 
 ## Doel
 
