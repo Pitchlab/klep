@@ -10,6 +10,8 @@ enum RenameMigrationTestSupport {
         let removed: Bool
         let legacyGone: Bool
         let newEnabled: Bool
+        /// De labels die aan launchd doorgegeven zijn om af te melden.
+        let unloaded: [String]
     }
 
     /// Legt een plist van de oude naam neer in een tijdelijke map, ruimt op, en kijkt
@@ -28,11 +30,14 @@ enum RenameMigrationTestSupport {
             FileManager.default.createFile(atPath: legacy.path, contents: Data("x".utf8))
         }
 
-        let removed = manager.removeLegacyAgent()
+        // launchctl niet echt aanroepen in de suite: de spy legt vast dát het gebeurt.
+        var unloaded: [String] = []
+        let removed = manager.removeLegacyAgent { unloaded.append($0) }
         return AgentCleanup(
             removed: removed,
             legacyGone: !FileManager.default.fileExists(atPath: legacy.path),
-            newEnabled: manager.isEnabled())
+            newEnabled: manager.isEnabled(),
+            unloaded: unloaded)
     }
 
     struct DirectoryMigration {

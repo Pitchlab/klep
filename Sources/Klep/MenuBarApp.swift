@@ -141,12 +141,38 @@ public struct LaunchAgentManager {
     /// niet — dit draait bij het opstarten en mag de app nooit tegenhouden. Geeft terug
     /// of er iets opgeruimd is.
     @discardableResult
-    public func removeLegacyAgent(label: String = LaunchAgentManager.legacyLabel) -> Bool {
+    public func removeLegacyAgent(
+        label: String = LaunchAgentManager.legacyLabel,
+        unload: (String) -> Void = LaunchAgentManager.bootout
+    ) -> Bool {
         let legacy = directory.appendingPathComponent("\(label).plist")
         guard FileManager.default.fileExists(atPath: legacy.path) else { return false }
         try? FileManager.default.removeItem(at: legacy)
+        // HET BESTAND WEGGOOIEN IS NIET GENOEG. launchd houdt een geladen job
+        // geregistreerd voor de hele sessie, ook nadat de plist van schijf is. Die
+        // registratie levert een tweede statusitem op zolang hij er is, en probeert bij
+        // de volgende login een bundel-id te starten dat na de hernoeming niet meer
+        // bestaat. Nagemeten op 2026-09-03: `launchctl print` toonde de job nog met
+        // `state = not running` en een pad naar de zojuist verwijderde plist.
+        unload(label)
         if !isEnabled() { try? enable() }
         return true
+    }
+
+    /// Meldt een job af bij launchd. `bootout` is de moderne vorm; `remove` blijft
+    /// erachteraan voor het geval de job nog op de oude manier geregistreerd staat.
+    /// Faalt stil: een job die er niet is, is precies de gewenste eindstand.
+    public static func bootout(_ label: String) {
+        let uid = getuid()
+        for arguments in [["bootout", "gui/\(uid)/\(label)"], ["remove", label]] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+        }
     }
 
     /// Schakelt auto-start om en geeft de nieuwe stand terug.

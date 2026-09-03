@@ -20,6 +20,20 @@ import Testing
         #expect(result.newEnabled)
     }
 
+    /// De plist weggooien is niet genoeg: launchd houdt een geladen job de hele sessie
+    /// geregistreerd, en dat gaf een tweede microfoon in de menubalk. De job moet ook
+    /// afgemeld worden, onder het OUDE label.
+    @Test func theLegacyJobIsAlsoUnloadedFromLaunchd() {
+        let result = RenameMigrationTestSupport.cleanupLegacyAgent(legacyEnabled: true)
+        #expect(result.unloaded == [LaunchAgentManager.legacyLabel])
+    }
+
+    /// Zonder oude plist wordt er ook niets afgemeld — geen blinde launchctl-aanroep op
+    /// een label dat niet van ons is.
+    @Test func nothingIsUnloadedWhenThereIsNoLegacyAgent() {
+        #expect(RenameMigrationTestSupport.cleanupLegacyAgent(legacyEnabled: false).unloaded.isEmpty)
+    }
+
     /// Zonder oude plist gebeurt er niets, en zeker wordt auto-start niet aangezet voor
     /// iemand die het nooit aan had staan.
     @Test func withoutALegacyAgentNothingHappens() {
