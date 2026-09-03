@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verpakt de release-binary PitchlabSpeechApp tot een macOS-appbundel
-# .build/PitchlabSpeech.app. Command Line Tools only, geen Xcode.
+# Verpakt de release-binary KlepApp tot een macOS-appbundel
+# .build/Klep.app. Command Line Tools only, geen Xcode.
 #
 # De bundel krijgt een Info.plist met:
 #   LSUIElement = true                 -> geen Dock-icoon, alleen een statusitem.
@@ -27,9 +27,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="PitchlabSpeech"
-BUNDLE_ID="nl.pitchlab.speech"
-EXECUTABLE="PitchlabSpeechApp"
+APP_NAME="Klep"
+BUNDLE_ID="nl.pitchlab.klep"
+EXECUTABLE="KlepApp"
 BUILD_DIR=".build"
 APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS="${APP_DIR}/Contents"
@@ -50,7 +50,7 @@ echo "==> bundel opnieuw opbouwen in ${APP_DIR}"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
-# De binary heet in de bundel gewoon PitchlabSpeech (CFBundleExecutable).
+# De binary heet in de bundel gewoon Klep (CFBundleExecutable).
 cp "${BIN_PATH}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 
@@ -83,7 +83,7 @@ cat > "${CONTENTS}/Info.plist" <<PLIST
     <key>CFBundleName</key>
     <string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>pitchlab-speech</string>
+    <string>Klep</string>
     <key>CFBundleIdentifier</key>
     <string>${BUNDLE_ID}</string>
     <key>CFBundleExecutable</key>
@@ -103,9 +103,9 @@ cat > "${CONTENTS}/Info.plist" <<PLIST
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>pitchlab-speech gebruikt de microfoon om je spraak lokaal naar tekst om te zetten.</string>
+    <string>Klep gebruikt de microfoon om je spraak lokaal naar tekst om te zetten.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>pitchlab-speech voegt de herkende tekst in bij de cursor van het actieve venster.</string>
+    <string>Klep voegt de herkende tekst in bij de cursor van het actieve venster.</string>
 </dict>
 </plist>
 PLIST

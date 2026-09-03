@@ -25,15 +25,15 @@ func developerDir() -> String {
 let frameworksPath = developerDir() + "/Library/Developer/Frameworks"
 
 let package = Package(
-    name: "PitchlabSpeech",
+    name: "Klep",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "PitchlabSpeech", targets: ["PitchlabSpeech"]),
-        // Menubalk-binary die `scripts/build-app.sh` tot PitchlabSpeech.app verpakt.
-        .executable(name: "PitchlabSpeechApp", targets: ["PitchlabSpeechApp"]),
-        // CLI-binary: `pitchlab-speech --once <wav>` transcribeert naar stdout,
+        .library(name: "Klep", targets: ["Klep"]),
+        // Menubalk-binary die `scripts/build-app.sh` tot Klep.app verpakt.
+        .executable(name: "KlepApp", targets: ["KlepApp"]),
+        // CLI-binary: `klep --once <wav>` transcribeert naar stdout,
         // zodat spraak in een pipe past en de gate zonder microfoon draait.
-        .executable(name: "pitchlab-speech", targets: ["PitchlabSpeechCLI"]),
+        .executable(name: "klep", targets: ["KlepCLI"]),
     ],
     dependencies: [
         // Parakeet TDT 0.6b v3 via CoreML/Neural Engine. Versie zoals bewezen in
@@ -42,7 +42,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "PitchlabSpeech",
+            name: "Klep",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
@@ -50,17 +50,17 @@ let package = Package(
         // Dunne instap: roept `runMenuBarApp()` uit de library. De AppKit-runloop
         // en het statusitem tonen is een mensentest; de logica staat in de library.
         .executableTarget(
-            name: "PitchlabSpeechApp",
-            dependencies: ["PitchlabSpeech"]
+            name: "KlepApp",
+            dependencies: ["Klep"]
         ),
         // Dunne CLI-instap: parseert `--once` en roept `Pipeline` in de library aan.
         .executableTarget(
-            name: "PitchlabSpeechCLI",
-            dependencies: ["PitchlabSpeech"]
+            name: "KlepCLI",
+            dependencies: ["Klep"]
         ),
         .testTarget(
-            name: "PitchlabSpeechTests",
-            dependencies: ["PitchlabSpeech"],
+            name: "KlepTests",
+            dependencies: ["Klep"],
             // Geen resources: de NL-fixture wordt in de test gegenereerd met
             // `say`+`afconvert` (zie Fixtures.swift), niet gecommit (ROE §5).
             swiftSettings: [.unsafeFlags(["-F", frameworksPath])],
