@@ -13,6 +13,11 @@
 ///    gebruiker. De aanroeper met een `nil`-store dicteert gewoon door zonder
 ///    geschiedenis.
 ///
+/// Het schema draagt een versienummer (`PRAGMA user_version`) en een migratiepad dat
+/// een bestaande database bij het openen naar de laatste versie stapt. Elke stap
+/// draait apart, in een transactie, en verhoogt de versie pas na succes — een stap
+/// die faalt laat geen half schema achter en blokkeert het dicteren niet.
+///
 /// De store praat tegen een injecteerbare log-closure; productie schrijft naar een
 /// `os.Logger`, de tests naar een spy, zodat de gate kan bewijzen dat een fout
 /// gelogd en niet gegooid wordt. SQLite via de systeemmodule `SQLite3` — geen extra
@@ -27,6 +32,15 @@ import os
 // de Swift-`String` na de call vrij mag verdwijnen. De constante zit niet in de
 // geïmporteerde header, dus hier met de hand gereconstrueerd (waarde -1).
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/// Eén migratiestap: de SQL die de database naar `version` brengt, plus dat versienummer.
+/// De stappen draaien op volgorde en alleen als hun versie boven de huidige ligt, dus
+/// een stap wordt nooit twee keer uitgevoerd. `sql` is idempotent (`IF NOT EXISTS`) zodat
+/// een tweede migratie een kolom of index kan toevoegen zonder de eerste te raken.
+struct Migration {
+    let version: Int32
+    let sql: String
+}
 
 /// Eén bewaarde uiting zoals hij uit de database komt. `recordedAt` is het moment
 /// waarop de uiting afgerond was, `duration` de lengte van de opname in seconden,
@@ -66,16 +80,42 @@ public final class TranscriptStore: @unchecked Sendable {
         Logger(subsystem: "nl.pitchlab.speech", category: "TranscriptStore").error("\(message, privacy: .public)")
     }
 
-    /// De vaste locatie in Application Support. Maakt de map aan als hij nog niet
-    /// bestaat. Bewust buiten de app-bundel, zodat een herbouw de geschiedenis niet
-    /// wist.
+    /// Het migratiepad. Stap 1 legt de basistabel aan; stap 2 de index op `recorded_at`
+    /// zodat het opruimen geen volledige scan is. Een bestaande database (versie 0) loopt
+    /// bij het openen elke stap af tot `schemaVersion`; een nieuwe database ook.
+    static let migrations: [Migration] = [
+        Migration(version: 1, sql: """
+            CREATE TABLE IF NOT EXISTS transcripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                recorded_at REAL NOT NULL,
+                duration REAL NOT NULL,
+                mode TEXT NOT NULL
+            );
+            """),
+        Migration(version: 2, sql: """
+            CREATE INDEX IF NOT EXISTS idx_transcripts_recorded_at
+                ON transcripts(recorded_at);
+            """),
+    ]
+
+    /// De laatste schemaversie: waar het migratiepad naartoe stapt.
+    static var schemaVersion: Int32 { migrations.last?.version ?? 0 }
+
+    /// De opruim-query op één plek, zodat het draaiende opruimen (`prune`) en het
+    /// query-plan (`prunePlanDescription`) gegarandeerd dezelfde query zijn.
+    private static let pruneSQL = "DELETE FROM transcripts WHERE recorded_at < ?;"
+
+    /// De vaste locatie in Application Support. Bewust buiten de app-bundel, zodat een
+    /// herbouw de geschiedenis niet wist. De map wordt met de juiste rechten (0700)
+    /// aangemaakt in `init`; hier alleen het pad.
     public static func defaultDatabaseURL() throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true)
-        let dir = support.appendingPathComponent("PitchlabSpeech", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("transcripts.sqlite3", isDirectory: false)
+        return support
+            .appendingPathComponent("PitchlabSpeech", isDirectory: true)
+            .appendingPathComponent("transcripts.sqlite3", isDirectory: false)
     }
 
     /// Het standaardpad als string, zonder mappen aan te maken. Zo kan de gate
@@ -100,8 +140,20 @@ public final class TranscriptStore: @unchecked Sendable {
 
     /// Kern-initializer op een kaal SQLite-pad. `":memory:"` opent een database in
     /// het geheugen (geen bestand, geen opruimen) — de vorm die de gate gebruikt.
-    init(sqlitePath: String, log: @escaping @Sendable (String) -> Void = TranscriptStore.defaultLog) throws {
+    /// `migrations` is injecteerbaar zodat de gate het migratiepad kan uitproberen;
+    /// productie neemt het standaardpad.
+    init(
+        sqlitePath: String,
+        migrations: [Migration] = TranscriptStore.migrations,
+        log: @escaping @Sendable (String) -> Void = TranscriptStore.defaultLog
+    ) throws {
         self.log = log
+        // Een echt bestand krijgt een afgeschermde map (0700) en een afgeschermd bestand
+        // (0600): de geschiedenis staat als platte tekst op schijf, alleen de eigenaar
+        // mag erbij (PL-935). Een geheugen-database heeft geen bestand, dus dan niet.
+        if sqlitePath != ":memory:" {
+            try TranscriptStore.secureContainingDirectory(ofFile: sqlitePath)
+        }
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(sqlitePath, &handle, flags, nil) == SQLITE_OK, let handle else {
@@ -111,15 +163,10 @@ public final class TranscriptStore: @unchecked Sendable {
         }
         self.db = handle
         do {
-            try exec("""
-                CREATE TABLE IF NOT EXISTS transcripts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    text TEXT NOT NULL,
-                    recorded_at REAL NOT NULL,
-                    duration REAL NOT NULL,
-                    mode TEXT NOT NULL
-                );
-                """)
+            if sqlitePath != ":memory:" {
+                try TranscriptStore.restrictFilePermissions(atPath: sqlitePath)
+            }
+            try runMigrations(migrations)
         } catch {
             sqlite3_close(handle)
             throw error
@@ -128,7 +175,78 @@ public final class TranscriptStore: @unchecked Sendable {
 
     deinit { sqlite3_close(db) }
 
-    /// Niet-gooiende fabriek voor het dicteerpad. Faalt het openen of het schema —
+    /// Stapt de database naar de laatste schemaversie. Leest `PRAGMA user_version`,
+    /// draait elke stap met een hogere versie apart in een transactie en verhoogt de
+    /// versie pas na `COMMIT`. Faalt een stap, dan `ROLLBACK` — geen half schema — en
+    /// de fout gaat omhoog; op het dicteerpad vangt `open(...)` hem op.
+    private func runMigrations(_ migrations: [Migration]) throws {
+        var current = userVersion()
+        for step in migrations where step.version > current {
+            try exec("BEGIN;")
+            do {
+                try exec(step.sql)
+                try exec("PRAGMA user_version = \(step.version);")
+                try exec("COMMIT;")
+            } catch {
+                try? exec("ROLLBACK;")
+                throw error
+            }
+            current = step.version
+        }
+    }
+
+    /// De huidige schemaversie uit `PRAGMA user_version`. `-1` als het lezen mislukt.
+    func userVersion() -> Int32 {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &statement, nil) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_ROW else { return -1 }
+        return sqlite3_column_int(statement, 0)
+    }
+
+    /// Of een tabel of index met die naam in het schema staat. Voor de gate, om te
+    /// bewijzen dat de index bestaat en dat een gefaalde migratie geen tabel achterliet.
+    func hasSchemaObject(_ name: String) -> Bool {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(
+            db, "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1;", -1, &statement, nil) == SQLITE_OK
+        else { return false }
+        sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    /// Of `column` in `table` bestaat. Voor de gate, om te bewijzen dat een tweede
+    /// migratiestap een kolom toevoegt. `table` is intern/gate, dus veilig te interpoleren.
+    func hasColumn(_ column: String, inTable table: String) -> Bool {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table));", -1, &statement, nil) == SQLITE_OK
+        else { return false }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let name = sqlite3_column_text(statement, 1), String(cString: name) == column { return true }
+        }
+        return false
+    }
+
+    /// Het query-plan van de opruim-query als tekst. `EXPLAIN QUERY PLAN` beschrijft
+    /// zonder te draaien welke tabellen en indexen SQLite raakt; de gate leest hieruit
+    /// dat de opruiming de index gebruikt (`USING INDEX`) en geen volledige scan (`SCAN`).
+    func prunePlanDescription() -> String {
+        let sql = "EXPLAIN QUERY PLAN " + TranscriptStore.pruneSQL
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return "query-plan mislukt (prepare): \(String(cString: sqlite3_errmsg(db)))"
+        }
+        var lines: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let detail = sqlite3_column_text(statement, 3) { lines.append(String(cString: detail)) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Niet-gooiende fabriek voor het dicteerpad. Faalt het openen of de migratie —
     /// een ontbrekende map, een corrupt bestand — dan gaat de fout naar de log en
     /// komt er `nil` terug; de aanroeper dicteert door zonder geschiedenis.
     /// `url` weglaten pakt de standaardlocatie in Application Support.
@@ -153,8 +271,19 @@ public final class TranscriptStore: @unchecked Sendable {
     public static func open(
         path: String, log: @escaping @Sendable (String) -> Void = TranscriptStore.defaultLog
     ) -> TranscriptStore? {
+        open(path: path, migrations: migrations, log: log)
+    }
+
+    /// Als `open(path:)`, maar met een injecteerbaar migratiepad zodat de gate het
+    /// migreren van een bestaande database kan uitproberen (een oudere versie openen,
+    /// rijen schrijven, met het volledige pad heropenen).
+    static func open(
+        path: String,
+        migrations: [Migration],
+        log: @escaping @Sendable (String) -> Void = TranscriptStore.defaultLog
+    ) -> TranscriptStore? {
         do {
-            return try TranscriptStore(sqlitePath: path, log: log)
+            return try TranscriptStore(sqlitePath: path, migrations: migrations, log: log)
         } catch {
             log("transcriptdatabase openen mislukt: \(error)")
             return nil
@@ -180,10 +309,9 @@ public final class TranscriptStore: @unchecked Sendable {
     /// dan gaat dat naar de log en werkt de rest gewoon.
     public func prune(olderThan days: Int = TranscriptStore.retentionDays, now: Date = Date()) {
         let cutoff = now.addingTimeInterval(-Double(days) * 24 * 60 * 60).timeIntervalSince1970
-        let sql = "DELETE FROM transcripts WHERE recorded_at < ?;"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+        guard sqlite3_prepare_v2(db, TranscriptStore.pruneSQL, -1, &statement, nil) == SQLITE_OK else {
             log("opruimen mislukt (prepare): \(String(cString: sqlite3_errmsg(db)))")
             return
         }
@@ -287,6 +415,65 @@ public final class TranscriptStore: @unchecked Sendable {
             sqlite3_free(errorPointer)
             throw StoreError.schema(message)
         }
+    }
+
+    // MARK: - Rechten (PL-935)
+
+    /// Zorgt dat de map waarin het databasebestand komt bestaat en alleen voor de
+    /// eigenaar leesbaar is (0700). Zet de rechten ook op een map die al bestond — hij
+    /// kan met een ruimere umask (0755) zijn aangemaakt, en dan repareert alleen het
+    /// aanmaakpad niets. Alleen de map zelf, niet de bovenliggende mappen.
+    private static func secureContainingDirectory(ofFile path: String) throws {
+        let dir = (path as NSString).deletingLastPathComponent
+        guard !dir.isEmpty else { return }
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        if !fm.fileExists(atPath: dir, isDirectory: &isDirectory) {
+            try fm.createDirectory(
+                atPath: dir, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+        }
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir)
+    }
+
+    /// Zet het databasebestand op 0600: alleen de eigenaar leest en schrijft.
+    private static func restrictFilePermissions(atPath path: String) throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+    }
+
+    // MARK: - Gate-hulp (Foundation buiten de testbestanden)
+
+    /// Een uniek, nog niet aangemaakt pad naar een databasebestand in een tijdelijke
+    /// map. De map maakt `init` aan (met 0700). Voor de gate, die het migreren over
+    /// open/dicht heen bewijst zonder zelf Foundation te hoeven aanraken.
+    static func makeTemporaryDatabasePath() -> String {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("pitchlab-speech-test-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("transcripts.sqlite3", isDirectory: false)
+            .path
+    }
+
+    /// Maakt een tijdelijke map met opgegeven rechten en geeft het pad terug. Voor de
+    /// gate, om het "map bestond al met ruime rechten"-geval te zetten (0755) en te
+    /// bewijzen dat het openen hem alsnog dichtzet.
+    static func makeTemporaryDirectory(permissions: Int) throws -> String {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pitchlab-speech-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            atPath: dir.path, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: permissions])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: permissions], ofItemAtPath: dir.path)
+        return dir.path
+    }
+
+    /// De POSIX-rechten van een pad als geheel getal, of `nil` als het pad niet bestaat
+    /// of geen rechten draagt. Voor de gate, om 0700 op de map en 0600 op het bestand
+    /// te controleren.
+    static func posixPermissions(atPath path: String) -> Int? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let permissions = attributes[.posixPermissions] as? NSNumber else { return nil }
+        return permissions.intValue
     }
 
     public enum StoreError: Error, Equatable {
