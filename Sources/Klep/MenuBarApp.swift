@@ -231,6 +231,35 @@ public struct LaunchState: Sendable, Equatable {
     }
 }
 
+// MARK: - Statusbalk-symbolen
+
+/// Bepaalt de symbolenrij voor het statusitem: precies één mic-glyph, plus de auto-enter-pijl en een eventuele waarschuwingsdriehoek. Puur, zodat de keuze zonder AppKit-runloop te testen is; `drawStatusButton` zet de rij om naar een template-`NSImage`.
+///
+/// De mic komt uit `HotkeyStatus.statusSymbols()` (element 0): `mic.slash` als hands-free uit staat, `mic.fill` als hij aan staat. Tijdens transcriberen vervangt `waveform` diezelfde ene glyph in plaats van er een tweede mic naast te zetten (PL-947). De app-state-mic (`SpeechState.symbolName`) telt niet langer als eigen glyph mee; er is dus altijd precies één mic. De auto-enter-pijl en de waarschuwingsdriehoek zijn geen microfoons en blijven ernaast staan.
+public func statusBarSymbols(
+    state: SpeechState,
+    status: HotkeyStatus,
+    permissionsMissing: Bool
+) -> [StatusSymbol] {
+    var symbols = status.statusSymbols()
+    // symbols[0] is de mic (hands-free). Tijdens transcriberen wordt die ene glyph de waveform; er komt nooit een tweede mic naast.
+    if state == .transcribing, !symbols.isEmpty {
+        symbols[0] = StatusSymbol(
+            systemName: "waveform",
+            isActive: true,
+            accessibilityLabel: state.menuLabel)
+    }
+    if permissionsMissing {
+        symbols.insert(
+            StatusSymbol(
+                systemName: "exclamationmark.triangle.fill",
+                isActive: true,
+                accessibilityLabel: "Er ontbreekt een permissie"),
+            at: 0)
+    }
+    return symbols
+}
+
 #if canImport(AppKit)
 import AppKit
 
@@ -404,17 +433,14 @@ public final class MenuBarController: NSObject {
     private func drawStatusButton() {
         guard let button = statusItem.button else { return }
         let status = hotkeys.status()
-        var symbols: [(name: String, active: Bool, label: String)] = [
-            (model.state.symbolName, true, model.state.menuLabel)
-        ]
-        symbols += status.statusSymbols().map { ($0.systemName, $0.isActive, $0.accessibilityLabel) }
-        // Ontbrekende permissie zichtbaar zonder het paneel te openen: een waarschuwings-
-        // glyph vooraan (PL-729). Zo zag Erik de uitgezette Toegankelijkheid meteen.
-        if permissionsMissing {
-            symbols.insert(
-                ("exclamationmark.triangle.fill", true, "Er ontbreekt een permissie"),
-                at: 0)
-        }
+        // Eén mic-glyph in de balk (PL-947): de rij komt uit `statusBarSymbols`, dat de
+        // app-state-mic niet meer als tweede glyph meetelt en tijdens transcriberen de ene
+        // mic naar `waveform` wisselt. De waarschuwingsdriehoek zit al in die rij.
+        let symbols = statusBarSymbols(
+            state: model.state,
+            status: status,
+            permissionsMissing: permissionsMissing
+        ).map { (name: $0.systemName, active: $0.isActive, label: $0.accessibilityLabel) }
 
         button.image = Self.composedStatusImage(from: symbols)
         button.imagePosition = .imageOnly
