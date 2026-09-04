@@ -1,8 +1,8 @@
 /// Het menubalk-paneel: een bedieningspaneel dat uit het statusitem klapt, in plaats
 /// van een `NSMenu`. Een menu kan geen schuifregelaar met een zichtbare waarde
 /// dragen, dus elke instelling die niet aan/uit is zou naar een apart venster moeten —
-/// één klik te ver voor een drempel die je per dictaat bijstelt (docs/ux-reference/
-/// analysis.md). Het paneel draagt gewone views, dus toggles, een dropdown en straks
+/// één klik te ver voor een drempel die je per dictaat bijstelt. Het paneel draagt
+/// gewone views, dus toggles, een dropdown en straks
 /// schuifregelaars staan op één plek.
 ///
 /// KEUZE: NSPopover, geankerd aan de statusitem-knop, niet een NSWindow met

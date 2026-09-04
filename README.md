@@ -54,9 +54,10 @@ Bestaat `PitchLab Local Code Signing` nog niet in je login-keychain, dan valt he
 
 ## Structuur
 
-- `Package.swift` — SwiftPM-manifest, target `Klep` (library) + `KlepTests`.
-- `Sources/Klep/` — de library. Nu alleen een scaffold-symbool.
-- `Tests/KlepTests/` — Swift Testing smoke-test.
+- `Package.swift` — SwiftPM-manifest: library `Klep`, executables `KlepApp` (de menubalk-app) en `klep` (de CLI).
+- `Sources/Klep/` — de library: opname en VAD, transcriptie, tekstuitvoer, hotkeys, menubalk-paneel, luister-indicator, geschiedenis.
+- `Sources/KlepApp/` — de `.app`-entrypoint. `Sources/KlepCLI/` — het `klep`-commando.
+- `Tests/KlepTests/` — de gate: 234 tests in 28 suites.
 - `docs/prd.md` — PRD, requirements, spikes.
 
 ## Versies
@@ -71,3 +72,17 @@ git tag -a v0.2.0 -m "<wat er veranderde>"
 ```
 
 Patch voor een fix, minor voor iets nieuws. Er is nog geen 1.0 en die komt pas als de Definition of Done rond is.
+
+## Toestemmingen, en waarvoor
+
+Klep vraagt er drie, en zonder elk daarvan valt een deel van de app stil:
+
+- **Microfoon** — opnemen. Zonder dit hoort de app niets en weigert hands-free te starten met een melding, in plaats van stil niets op te nemen.
+- **Toegankelijkheid** — het transcript bij de cursor invoegen. Zonder dit verschijnt de tekst wel op stdout maar niet in het venster waarin je werkt.
+- **Invoerbewaking** — de twee globale sneltoetsen opvangen, ook als een ander programma focus heeft. Zonder dit werken de toetsen alleen als Klep zelf vooraan staat.
+
+Alles blijft lokaal. Er is geen server, geen account en geen netwerkverkeer buiten het eenmalig ophalen van de modellen.
+
+## Licentie
+
+MIT, zie `LICENSE`.
