@@ -28,6 +28,19 @@ import Testing
         #expect(result.unloaded == [LaunchAgentManager.legacyLabel])
     }
 
+    /// Draait er een kopie uit een build-map, dan wordt auto-start NIET overgenomen.
+    /// `enable()` schrijft het pad van de draaiende binary, en dat pad is dan een
+    /// wegwerpmap: bij de volgende login start daar een tweede Klep naast de
+    /// geïnstalleerde, met twee microfoons in de menubalk als gevolg.
+    @Test func autoStartIsNotCarriedOverFromABuildDirectory() {
+        let result = RenameMigrationTestSupport.cleanupLegacyAgent(
+            legacyEnabled: true,
+            executablePath: "/Users/x/Sites/tools/pitchlab-tools/pitchlab-speech/.build/Klep.app/Contents/MacOS/Klep")
+        #expect(result.removed)
+        #expect(result.legacyGone)
+        #expect(!result.newEnabled)
+    }
+
     /// Zonder oude plist wordt er ook niets afgemeld — geen blinde launchctl-aanroep op
     /// een label dat niet van ons is.
     @Test func nothingIsUnloadedWhenThereIsNoLegacyAgent() {

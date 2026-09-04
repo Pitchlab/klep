@@ -16,14 +16,16 @@ enum RenameMigrationTestSupport {
 
     /// Legt een plist van de oude naam neer in een tijdelijke map, ruimt op, en kijkt
     /// wat er daarna staat. Raakt `~/Library/LaunchAgents` niet aan.
-    static func cleanupLegacyAgent(legacyEnabled: Bool) -> AgentCleanup {
+    static func cleanupLegacyAgent(
+        legacyEnabled: Bool, executablePath: String = "/Applications/Klep.app/Contents/MacOS/Klep"
+    ) -> AgentCleanup {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("klep-agents-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let manager = LaunchAgentManager(
-            agent: LaunchAgent(label: "nl.pitchlab.klep", executablePath: "/usr/bin/true"),
+            agent: LaunchAgent(label: "nl.pitchlab.klep", executablePath: executablePath),
             directory: dir)
         let legacy = dir.appendingPathComponent("\(LaunchAgentManager.legacyLabel).plist")
         if legacyEnabled {

@@ -155,8 +155,21 @@ public struct LaunchAgentManager {
         // bestaat. Nagemeten op 2026-09-03: `launchctl print` toonde de job nog met
         // `state = not running` en een pad naar de zojuist verwijderde plist.
         unload(label)
-        if !isEnabled() { try? enable() }
+        // De auto-start-stand alleen overnemen als deze kopie in /Applications staat.
+        //
+        // `enable()` schrijft het pad van de DRAAIENDE binary. Draait dat een kopie uit
+        // `.build/`, dan wijst de auto-start naar een wegwerpmap, en start er bij de
+        // volgende login een tweede Klep naast de geïnstalleerde — twee microfoons in de
+        // menubalk. Nagemeten op 2026-09-03, en precies zo gebeurd.
+        if isInstalledCopy && !isEnabled() { try? enable() }
         return true
+    }
+
+    /// Of de binary waarnaar deze agent verwijst in `/Applications` staat. Alleen die
+    /// kopie hoort bij het inloggen gestart te worden; een build-map is per definitie
+    /// tijdelijk.
+    public var isInstalledCopy: Bool {
+        agent.executablePath.hasPrefix("/Applications/")
     }
 
     /// Meldt een job af bij launchd. `bootout` is de moderne vorm; `remove` blijft
