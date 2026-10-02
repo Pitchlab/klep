@@ -1,8 +1,7 @@
 /// Het opnemen van een sneltoets: de gebruiker klikt in een opnameveld, drukt een
 /// combinatie, en die wordt getoond en bewaard. Twee dingen die een gewoon
 /// opnameveld níet doet, horen hier wél:
-///  - een kále modifier accepteren (rechter cmd alleen), want de defaults uit PL-732
-///    zijn modifier-only; een gewoon opnameveld negeert een losse modifier;
+///  - een kale modifier accepteren (rechter cmd alleen), omdat de standaardtoetsen modifier-only zijn; een gewoon opnameveld negeert een losse modifier;
 ///  - een combinatie weigeren die de andere actie al gebruikt, want twee acties op
 ///    dezelfde toets is een stille bug.
 ///
@@ -40,8 +39,7 @@ public enum RecorderEvent: Equatable, Sendable {
 
 /// Het opnameveld als state-machine. Voed hem `RecorderEvent`s; zodra een geldige
 /// combinatie klaar is, staat die in `recorded`. Anders dan een gewoon opnameveld
-/// legt hij expliciet óók een kale modifier vast (rechter cmd), want de defaults uit
-/// PL-732 zijn modifier-only. Puur — geen AppKit, geen runloop — dus volledig getest.
+/// legt hij expliciet ook een kale modifier vast (rechter cmd), omdat de standaardtoetsen modifier-only zijn. Puur — geen AppKit, geen runloop — dus volledig getest.
 public final class HotkeyRecorder {
     /// De opgenomen combinatie, of nil zolang er nog niets vastligt.
     public private(set) var recorded: KeyCombo?
@@ -275,7 +273,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
     /// Aangeroepen als een permissieknop geklikt wordt. Dit venster opent zelf niets.
     public var onOpenPrivacySettings: ((PermissionKind) -> Void)?
 
-    /// De twee tijdregelaars en hun waardelabels (PL-746). Opgeslagen omdat het label
+    /// De twee tijdregelaars en hun waardelabels. Opgeslagen omdat het label
     /// tijdens het slepen moet meelopen; verder gedragen ze zich als elke andere rij.
     private let autoEnterDelaySlider = NSSlider()
     private let autoEnterDelayValue = HotkeySettingsWindowController.captionLabel("")
@@ -334,7 +332,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
 
     /// Leest de permissies vers en hertekent het blok. Aangeroepen bij elke keer tonen,
     /// zodat een vinkje dat je net omzette klopt zonder herstart — dezelfde eis als toen
-    /// het blok nog in het paneel zat (PL-729).
+    /// het blok nog in het paneel zat.
     public func refreshPermissions() {
         guard let permissionsProbe else { return }
         permissionsSection.render(permissionsProbe.snapshot(), into: permissionSlot)
@@ -485,7 +483,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
         return row
     }
 
-    /// De twee tijdrijen (PL-746): hoelang de Return uitblijft na de tekst, en hoeveel
+    /// De twee tijdrijen: hoelang de Return uitblijft na de tekst, en hoeveel
     /// stilte een uiting afkapt.
     ///
     /// Dezelfde driedeling als een sneltoetsrij — naam links, bediening van 150 punt,
@@ -546,7 +544,7 @@ public final class HotkeySettingsWindowController: NSWindowController {
         silenceThresholdValue.stringValue = SilenceThreshold.valueLabel(sender.doubleValue)
     }
 
-    /// Start-bij-inloggen. Stond tot PL-788 in het menubalk-paneel; het is een voorkeur die
+    /// Start bij inloggen is een voorkeur die
     /// je één keer zet, en het paneel gaat over dicteren.
     private func makeAutoStartRow() -> NSView {
         let toggle = NSSwitch()

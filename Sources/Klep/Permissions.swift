@@ -1,9 +1,5 @@
 /// De drie permissies die samen bepalen of de app iets doet, als één sectie in het
-/// instellingenvenster (PL-729, verhuisd in PL-788). Tot PL-729 was het enige signaal een
-/// losse ⚠︎-regel in het menu; Erik zag een uitgezette Toegankelijkheid pas na drie uur
-/// zoeken. Het hoofdpaneel houdt een bannertje (`PermissionsModel.bannerText`) en het
-/// statusitem een waarschuwingsdriehoek — samen de enige melding die je ziet als je nooit
-/// iets opent.
+/// instellingenvenster. Het hoofdpaneel toont een bannertje (`PermissionsModel.bannerText`) en het statusitem een waarschuwingsdriehoek bij ontbrekende toestemming.
 ///
 /// Twee lagen, net als de rest van de app, zodat de logica zonder runloop te testen is:
 ///  - Pure model-laag (`PermissionKind`, `PermissionItem`, `PermissionsModel`,
@@ -12,7 +8,7 @@
 ///    getest in `PermissionsScreenTests`.
 ///  - AppKit-laag (`PermissionsSectionView`), onder `#if canImport(AppKit)`: hangt de
 ///    rijen in een stackview die de aanroeper levert. Wat je tekent en het echt openen van
-///    een Systeeminstellingen-paneel zijn mensentesten (ROE §2).
+///    een Systeeminstellingen-paneel vragen handmatige verificatie.
 
 import Foundation
 
@@ -26,7 +22,6 @@ public enum PermissionKind: String, CaseIterable, Sendable, Equatable {
 
     /// De rij-titel: waarvóór je de permissie wilt, niet hoe macOS hem noemt.
     ///
-    /// Erik 2026-09-01: "de labels moeten even aangepast naar waarom je het wilt".
     /// "Toegankelijkheid" en "Invoerbewaking" zeggen niets over wat je eraan hebt;
     /// "Tekst-uitvoer" en "Sneltoetsen" wel. De macOS-naam blijft nodig om het vinkje
     /// terug te vinden en staat in `systemName`, dat de rij eronder noemt.
@@ -83,14 +78,7 @@ public enum PermissionKind: String, CaseIterable, Sendable, Equatable {
         }
     }
 
-    /// De URL die het juiste Systeeminstellingen-paneel opent. KANDIDAAT — twee varianten,
-    /// niet zelf getest (draait op Eriks werkende Mac, ROE §2):
-    ///   A (nu gekozen, System Settings sinds macOS 13):
-    ///       `x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?<anker>`
-    ///   B (klassiek preference-paneel, oudere macOS):
-    ///       `x-apple.systempreferences:com.apple.preference.security?<anker>`
-    /// Erik bevestigt in het review welke op macOS 26 het juiste deelvenster opent; wissel
-    /// dan het prefix hieronder om.
+    /// URL voor het Privacy-deelvenster van Systeeminstellingen.
     public var settingsURLString: String {
         "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(settingsAnchor)"
     }
@@ -165,7 +153,7 @@ public protocol PermissionStatusSource: Sendable {
     func inputMonitoringGranted() -> Bool
 }
 
-/// De echte statusbron: microfoon uit PL-740 (`MicrophonePermission`), Toegankelijkheid
+/// De echte statusbron: microfoon via `MicrophonePermission`, Toegankelijkheid
 /// via `AXIsProcessTrusted` (dezelfde check als `CGEventKeystrokeInserter`), Invoerbewaking
 /// via `IOHIDCheckAccess` (`InputMonitoring`). Leest alleen; vraagt niets aan. Mensentest
 /// voor de echte waarden.
@@ -229,14 +217,14 @@ import AppKit
 // MARK: - AppKit-laag (mensentest)
 
 /// Tekent het `PermissionsModel` als rijen in een `NSStackView` die de aanroeper levert.
-/// Sinds PL-788 is dat het instellingenvenster; het hoofdpaneel toont alleen nog een
+/// De sectie staat in het instellingenvenster; het hoofdpaneel toont alleen een
 /// bannertje. Elke rij: naam + live status, wat er zonder werkt en niet, een herstart-hint
 /// als die geldt, en een gecentreerde knop naar Systeeminstellingen. Divider boven en
 /// onder het blok.
 @MainActor
 public final class PermissionsSectionView {
     /// Aangeroepen als de knop bij een permissie geklikt wordt, met de soort. De aanroeper
-    /// opent het Systeeminstellingen-paneel; deze view opent zelf niets (ROE §2).
+    /// opent het Systeeminstellingen-paneel; deze view opent zelf niets.
     public var onOpenSettings: ((PermissionKind) -> Void)?
 
     public init() {}

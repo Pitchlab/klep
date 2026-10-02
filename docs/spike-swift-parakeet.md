@@ -1,6 +1,6 @@
-# Spike: draait Parakeet native in Swift? (PL-715 / PIT-847)
+# Spike: draait Parakeet native in Swift?
 
-Beslissingsspike voor PL-690 (taalkeuze) onder de board-beslissing van 2026-08-31: geen Python in de app. Vraag: kan de app puur Swift zijn, of blijft Python als backend nodig?
+Experiment voor de taalkeuze: geen Python in de app. Vraag: kan de app puur Swift zijn, of blijft Python als backend nodig?
 
 **Conclusie: ja, puur Swift werkt.** FluidAudio resolvet als SwiftPM-dependency, compileert met alleen Command Line Tools, laadt het Parakeet TDT 0.6b v3 CoreML-model en transcribeert een Nederlandse fixture correct. Op alle gemeten assen (koude start, warme transcriptie, piek-geheugen) is Swift+CoreML beter dan de Python/MLX-baseline. Python is niet nodig.
 
@@ -8,8 +8,7 @@ Dit is een wegwerp-spike, geen productiecode.
 
 ## Opzet
 
-- Repo: `pitchlab-tools`, branch `feat/speech`, worktree `paperclip/PIT-847`.
-- Spike-project: `pitchlab-speech/spikes/swift-parakeet/` — SwiftPM executable `parakeet-spike`.
+- Spike-project: `spikes/swift-parakeet/` — SwiftPM executable `parakeet-spike`.
 - Toolchain: Apple Swift 6.2.4, `xcode-select -p` = `/Library/Developer/CommandLineTools`. **Xcode is niet geïnstalleerd.** Build via `swift build -c release`.
 - Machine: Apple Silicon, macOS 26.
 - Fixture: `say -v Xander -o f.aiff 'Zet hands free modus aan en typ dit bij de cursor.'` → ffmpeg naar 16 kHz mono PCM wav (`fixture.wav`, 2.59 s).

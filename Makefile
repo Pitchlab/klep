@@ -1,4 +1,4 @@
-# Gate voor pitchlab-speech. Command Line Tools only, geen Xcode.
+# Build- en testgate voor Klep met de macOS Command Line Tools.
 #
 # `swift test` kaal draait GEEN tests op een CLT-only Mac: XCTest ontbreekt in de
 # CLT, alleen Swift Testing (Testing.framework) is aanwezig, en die staat niet op

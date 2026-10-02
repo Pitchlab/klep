@@ -67,7 +67,7 @@ case .on:
         indicator: SilentListeningIndicator(),
         permission: AVCaptureMicrophonePermission(),
         autoEnter: { autoEnter },
-        // Ook deze route bewaart (PL-757). `--listen` is dicteren, geen bestand
+        // Ook deze route bewaart. `--listen` is dicteren, geen bestand
         // omzetten: `mode` legt vast dat het transcript naar stdout ging en niet naar
         // de cursor. `--once` blijft bewust ongestoord — dat zet een bestand om.
         store: TranscriptStore.open())
@@ -90,7 +90,7 @@ case .on:
 
     let started = await ListenMode().turnOn(controller: controller, device: device)
     guard started else {
-        // Microfoontoestemming geweigerd (PL-740): de reden staat al op stderr via
+        // Microfoontoestemming geweigerd: de reden staat al op stderr via
         // onError; sluit af met een niet-0 exit zodat een script het ziet.
         fail("--listen kon niet starten: geen microfoontoestemming.", code: 3)
     }

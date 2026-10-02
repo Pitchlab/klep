@@ -8,7 +8,7 @@
 ///  - AppKit-laag (`ListeningIndicatorController`), onder `#if canImport(AppKit)`:
 ///    het non-activating `NSPanel` dat de stip tekent, muis-events doorlaat behalve
 ///    tijdens slepen, en de positie bewaart. Compileert in de gate; het echt tonen
-///    van het venster is een mensentest (PRD, R7).
+///    van het venster is een mensentest.
 ///
 /// Het audioniveau is injecteerbaar (`AudioLevelSource`): de weergave leest hier het
 /// niveau, de test voedt samples zonder microfoon. Zo zie je dat de app je hóórt en
@@ -187,7 +187,7 @@ public final class UserDefaultsIndicatorPositionStore: IndicatorPositionStore {
 
 /// Vertaalt een audioniveau naar de maat en de dekking van de stip.
 ///
-/// HERZIEN DOOR PL-747, want hij reageerde te subtiel om iets aan te hebben. Twee
+/// De stip reageert op het audioniveau. Twee
 /// dingen volgen nu het niveau, en één ding juist niet:
 ///  - de DIAMETER groeit van 21 naar 63 punt (was 14 tot 42, dus anderhalf keer zo
 ///    groot). Groeien was het enige dat al werkte en blijft.
@@ -371,12 +371,7 @@ public final class ListeningIndicatorController {
 
     /// Zet de stip terug naar het midden van het primaire scherm en bewaart die positie.
     ///
-    /// NU ZONDER AANROEPER. Het menu-item dat dit aanriep is met het NSMenu verdwenen
-    /// (PL-764) en er is bewust geen knop voor teruggekomen: PL-747 maakt de positie
-    /// instelbaar als fractie van de schermhoogte, en dan is springen-naar-het-midden
-    /// een geval van die regelaar. PL-747 beslist of deze methode weg kan of de basis
-    /// wordt. Tot dan blijft hij staan als de enige weg terug voor een stip die buiten
-    /// beeld raakte.
+    /// Houdt de reset beschikbaar voor een stip die buiten beeld is geraakt.
     public func resetToCenter() {
         positionStore.save(.center)
         place(.center)

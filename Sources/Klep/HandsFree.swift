@@ -54,8 +54,7 @@ public protocol TranscriptEmitting: Sendable {
     /// De Return, los van de tekst. Apart zodat `AutoEnterDelay` ertussen past; met
     /// auto-enter uit wordt hij nooit aangeroepen.
     func emitReturn() throws
-    /// Hoe deze bestemming in de geschiedenis heet (PL-757 wil weten waar het
-    /// transcript heen ging: naar de cursor of naar stdout).
+    /// Naam van de bestemming in de geschiedenis: cursor of stdout.
     var historyRoute: String { get }
 }
 
@@ -87,13 +86,13 @@ public actor HandsFreeController {
     /// Idem voor de wachttijd vóór de Return: een closure en geen opgeslagen getal,
     /// zodat de regelaar in het paneel meteen werkt zonder de keten te herstarten.
     private let autoEnterDelay: @Sendable () -> TimeInterval
-    /// Dempt de systeemuitvoer zolang de opname loopt (PL-766): speaker-geluid gaat
+    /// Dempt de systeemuitvoer zolang de opname loopt: speaker-geluid gaat
     /// anders de microfoon in en wordt meegetranscribeerd. Standaard `NoSystemAudioMuting`
     /// (uit) zodat de keten ongewijzigd draait; de app injecteert een `SystemAudioMuter`
     /// als de instelling aan staat. Demp bij de start, herstel bij het stoppen.
     private let systemAudio: SystemAudioMuting
 
-    /// Waar afgeronde uitingen bewaard worden, of nil (geen geschiedenis). PL-757:
+    /// Waar afgeronde uitingen bewaard worden, of nil (geen geschiedenis).
     /// het dicteren is de hoofdtaak, dus een ontbrekende of kapotte database mag het
     /// invoegen nooit blokkeren — `record` gooit daarom niet en `nil` is geldig.
     private let store: TranscriptStore?
@@ -158,7 +157,7 @@ public actor HandsFreeController {
             return false
         }
         diagnostics.log(.deviceSelected(name: device?.localizedName))
-        // Demp de systeemuitvoer zolang de opname loopt (PL-766). Na de toestemming en
+        // Demp de systeemuitvoer zolang de opname loopt. Na de toestemming en
         // vóór de eerste sample: speaker-geluid gaat anders meteen de microfoon in. De
         // vorige stand wordt bewaard zodat het herstel klopt (standaard uit: no-op).
         await systemAudio.muteForRecording()
@@ -173,8 +172,7 @@ public actor HandsFreeController {
         }
         do {
             try await transcriber.warmUp()
-            // PL-765 meet dit: de tijd tot de eerste sample is wat je aan het begin
-            // van je eerste woord kwijt bent doordat de opnamesessie nog opgezet werd.
+            // De tijd tot de eerste sample laat zien hoeveel audio aan het begin van het eerste woord verloren kan gaan.
             let startedAt = Date()
             var firstSampleSeen = false
             let events = try audio.start(device: device)
@@ -194,7 +192,7 @@ public actor HandsFreeController {
         } catch {
             report(error, origin: "audiobron")
         }
-        // Herstel de systeemuitvoer naar de bewaarde stand (PL-766). Was hij vóór de
+        // Herstel de systeemuitvoer naar de bewaarde stand. Was hij vóór de
         // opname al gedempt, dan blijft hij gedempt. Loopt op elke exit ná het dempen,
         // ook na een audiobronfout. Een crash slaat dit over; dan herstelt de bewaarde
         // schijf-stand bij de volgende start.

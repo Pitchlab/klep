@@ -125,7 +125,7 @@ public struct LaunchAgentManager {
         }
     }
 
-    /// Het label dat de app droeg vóór de hernoeming naar Klep (PL-731).
+    /// Het label dat de app droeg vóór de hernoeming naar Klep.
     public static let legacyLabel = "nl.pitchlab.speech"
 
     /// Ruimt de LaunchAgent van de oude naam op.
@@ -133,8 +133,7 @@ public struct LaunchAgentManager {
     /// De hernoeming veranderde het label, dus `enable()` schrijft voortaan
     /// `nl.pitchlab.klep.plist`. De oude plist blijft daarnaast staan en wijst naar een
     /// bundel-id die niet meer bestaat; launchd probeert hem bij elke login te starten en
-    /// faalt stil. PL-731 noemt dit met zoveel woorden als de valkuil van een halve
-    /// hernoeming.
+    /// faalt stil.
     ///
     /// De auto-start-stand gaat mee over: stond de oude aan, dan staat de nieuwe aan.
     /// Anders verliest iemand die auto-start had zijn instelling zonder melding. Gooit
@@ -207,14 +206,10 @@ public struct LaunchAgentManager {
 ///
 /// Hands-free begint altijd uit. Hij opent een live microfoon en de app start mee
 /// met inloggen, dus aangaan zonder dat iemand erop klikte is een verrassing die je
-/// niet wilt. Vóór PL-742 werd de bewaarde stand wél getoond maar niet toegepast:
+/// niet wilt. Eerder werd de bewaarde stand wel getoond maar niet toegepast:
 /// het menu zei "aan" terwijl er niets luisterde, en eruit komen kostte twee
 /// toggles. Daarom wordt de stand hier ook in de store op uit gezet — menu-stand en
 /// sessie-stand horen hetzelfde te zeggen.
-///
-/// Erik 2026-09-01: de bewaarde hands-free-stand is geschrapt in plaats van
-/// herstelbaar gemaakt. Je wilt nooit dat je computer aangaat en meteen meeluistert,
-/// dus een schakelaar om dat wél te doen is werk voor een geval dat niet bestaat.
 ///
 /// Auto-enter houdt zijn bewaarde stand. Die opent niets — hij bepaalt alleen of een
 /// uiting met een Return wordt afgesloten — dus is er geen verrassing om tegen te
@@ -235,7 +230,7 @@ public struct LaunchState: Sendable, Equatable {
 
 /// Bepaalt de symbolenrij voor het statusitem: precies één mic-glyph, plus de auto-enter-pijl en een eventuele waarschuwingsdriehoek. Puur, zodat de keuze zonder AppKit-runloop te testen is; `drawStatusButton` zet de rij om naar een template-`NSImage`.
 ///
-/// De mic komt uit `HotkeyStatus.statusSymbols()` (element 0): `mic.slash` als hands-free uit staat, `mic.fill` als hij aan staat. Tijdens transcriberen vervangt `waveform` diezelfde ene glyph in plaats van er een tweede mic naast te zetten (PL-947). De app-state-mic (`SpeechState.symbolName`) telt niet langer als eigen glyph mee; er is dus altijd precies één mic. De auto-enter-pijl en de waarschuwingsdriehoek zijn geen microfoons en blijven ernaast staan.
+/// De mic komt uit `HotkeyStatus.statusSymbols()` (element 0): `mic.slash` als hands-free uit staat, `mic.fill` als hij aan staat. Tijdens transcriberen vervangt `waveform` diezelfde ene glyph in plaats van er een tweede mic naast te zetten. De app-state-mic (`SpeechState.symbolName`) telt niet langer als eigen glyph mee; er is dus altijd precies één mic. De auto-enter-pijl en de waarschuwingsdriehoek zijn geen microfoons en blijven ernaast staan.
 public func statusBarSymbols(
     state: SpeechState,
     status: HotkeyStatus,
@@ -303,7 +298,7 @@ public final class MenuBarController: NSObject {
     /// kan geen schuifregelaar met een zichtbare waarde dragen (zie `MenuBarPanel.swift`).
     private let popover = NSPopover()
     private let panel = MenuBarPanelController()
-    /// Leest de drie permissiestatussen live (PL-729); cachet niets, zodat een omgezet
+    /// Leest de drie permissiestatussen live; cachet niets, zodat een omgezet
     /// vinkje klopt zonder herstart.
     private let permissionsProbe: PermissionsProbe
     /// Of er nu een permissie ontbreekt; het statusitem toont dat dan zonder het menu.
@@ -352,7 +347,7 @@ public final class MenuBarController: NSObject {
             self?.hotkeys.setOn(isOn, for: .autoEnter)
             self?.refreshHotkeyState()
         }
-        // Terug naar het midden: zet de luister-stip terug (PL-737). Alleen gekoppeld
+        // Terug naar het midden: zet de luister-stip terug. Alleen gekoppeld
         // als er een stip is; de knop verschijnt anders niet (`canRecenter`).
         panel.onRecenter = { [weak self] in self?.listeningIndicator?.resetToCenter() }
         panel.onSelectDevice = { [weak self] id in
@@ -391,7 +386,7 @@ public final class MenuBarController: NSObject {
     }
 
     /// Opent het bedieningspaneel — gebruikt om de permissie-sectie bij de eerste start
-    /// aan te bieden (PL-729), wanneer het gat het grootst is.
+    /// aan te bieden, wanneer het gat het grootst is.
     public func openPanel() {
         guard let button = statusItem.button, !popover.isShown else { return }
         refreshPermissions()
@@ -401,7 +396,7 @@ public final class MenuBarController: NSObject {
 
     /// Leest de drie permissiestatussen live en bewaart wat het paneel ervan toont.
     ///
-    /// De volledige sectie staat sinds PL-788 in het instellingenvenster; hier blijft
+    /// De volledige sectie staat in het instellingenvenster; hier blijft
     /// alleen een bannertje plus de waarschuwingsdriehoek op het statusitem. Die twee
     /// samen zijn de enige melding die je ziet als je nooit iets opent, en dat was de
     /// eis die bij de verhuizing niet mocht sneuvelen.
@@ -427,13 +422,13 @@ public final class MenuBarController: NSObject {
     /// Tekent de staat plus beide hotkey-standen als één rij SF Symbols op de
     /// statusbalk-knop, zonder tekstlabel — de vroegere "HF● AE○"-tekst is nu
     /// `mic.fill`/`mic.slash` (hands-free) en `arrow.turn.down.left(.circle)`
-    /// (auto-enter), zie `HotkeyStatus.statusSymbols()` (PL-730). Beide toggles
-    /// blijven zo afleesbaar zonder het menu te openen (R3, spec PL-704). De hele
+    /// (auto-enter), zie `HotkeyStatus.statusSymbols()`. Beide toggles
+    /// blijven zo afleesbaar zonder het menu te openen. De hele
     /// knop krijgt een VoiceOver-samenvatting via `accessibilityLabel`.
     private func drawStatusButton() {
         guard let button = statusItem.button else { return }
         let status = hotkeys.status()
-        // Eén mic-glyph in de balk (PL-947): de rij komt uit `statusBarSymbols`, dat de
+        // Eén mic-glyph in de balk: de rij komt uit `statusBarSymbols`, dat de
         // app-state-mic niet meer als tweede glyph meetelt en tijdens transcriberen de ene
         // mic naar `waveform` wisselt. De waarschuwingsdriehoek zit al in die rij.
         let symbols = statusBarSymbols(
@@ -495,8 +490,8 @@ public final class MenuBarController: NSObject {
     /// De store is dezelfde als het statusitem gebruikt, dus een nieuwe combinatie is
     /// meteen elders zichtbaar; `onRebindHotkey` registreert hem live.
     /// Bouwt het instellingenvenster: sneltoetsen, auto-start en de permissiesectie
-    /// (PL-788). Het venster opent zelf geen Systeeminstellingen — die knop komt hierheen
-    /// terug, zodat het echt openen een mensentest blijft (ROE §2). Een schrijffout bij
+    /// Het venster opent zelf geen Systeeminstellingen — die knop komt hierheen
+    /// terug, zodat het echt openen een mensentest blijft . Een schrijffout bij
     /// auto-start landt zichtbaar in de statusregel in plaats van stil te verdwijnen (R9).
     private func makeSettingsWindow() -> HotkeySettingsWindowController {
         let controller = HotkeySettingsWindowController(
@@ -581,7 +576,7 @@ public final class MenuBarController: NSObject {
             canRecenter: listeningIndicator != nil))
     }
 
-    /// Opent het geschiedenisvenster (PL-757). De store gaat pas open als je hem
+    /// Opent het geschiedenisvenster. De store gaat pas open als je hem
     /// opvraagt, en blijft daarna bestaan zolang het venster leeft. Lukt openen niet —
     /// een kapotte database — dan gebeurt er niets zichtbaars behalve een regel in de
     /// log; het dicteren mag hier nooit onder lijden.
@@ -635,7 +630,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             agent: LaunchAgent(executablePath: executablePath))
         let hotkeys = HotkeyStore(defaults: UserDefaults.standard)
         self.hotkeys = hotkeys
-        // De toggles op hun opstartstand zetten, niet alleen tonen (PL-742). Hands-free
+        // De toggles op hun opstartstand zetten, niet alleen tonen. Hands-free
         // gaat hard op uit zodat het menu de werkelijke, niet-luisterende stand toont;
         // de keten wordt hier niet gestart. Auto-enter blijft zoals bewaard.
         diagnostics.log(.handsFreeRestored(on: hotkeys.isOn(.handsFree)))
@@ -655,8 +650,8 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         // De twee globale hotkeys registreren, het statusitem hertekenen bij een
         // toggle, en de hands-free-toggle de keten laten starten/stoppen. Ontbreekt
         // Input Monitoring, dan zet `start()` een expliciete melding klaar in plaats
-        // van stil te falen (spec PL-704).
-        // De LaunchAgent van vóór de hernoeming opruimen (PL-731). Bij het opstarten,
+        // van stil te falen.
+        // De LaunchAgent van vóór de hernoeming opruimen. Bij het opstarten,
         // want dat is het eerste moment waarop de nieuwe bundel draait; laat je hem
         // staan, dan start launchd bij elke login een bundel die niet meer bestaat.
         launchAgent.removeLegacyAgent()
@@ -684,7 +679,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         }
         self.hotkeyManager = manager
 
-        // Bied de permissie-sectie aan bij de eerste start (PL-729): dan is het gat het
+        // Bied de permissie-sectie aan bij de eerste start: dan is het gat het
         // grootst en staan de drie permissies meestal nog uit. Eén keer, daarna niet meer.
         let launchedKey = "klep.hasLaunchedBefore"
         let hasLaunchedBefore = UserDefaults.standard.bool(forKey: launchedKey)
@@ -721,7 +716,7 @@ public final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             permission: AVCaptureMicrophonePermission(),
             diagnostics: diagnostics,
             autoEnter: { UserDefaults.standard.bool(forKey: HotkeyAction.autoEnter.stateKey) },
-            // Opslaan staat standaard aan (Erik, 2026-09-02). `open` ruimt meteen op wat
+            // Opslaan staat standaard aan. `open` ruimt meteen op wat
             // ouder is dan 30 dagen en geeft nil bij een kapotte database — dan dicteer
             // je door zonder geschiedenis in plaats van niet te dicteren.
             store: TranscriptStore.open())

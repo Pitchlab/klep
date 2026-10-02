@@ -6,7 +6,7 @@
 #   LSUIElement = true                 -> geen Dock-icoon, alleen een statusitem.
 #   NSMicrophoneUsageDescription       -> permissie-tekst voor de microfoon (R7).
 #   NSAppleEventsUsageDescription      -> Accessibility/toetsaanslagen (R9).
-#   CFBundleIconFile/CFBundleIconName  -> AppIcon.icns in Contents/Resources (PL-730).
+#   CFBundleIconFile/CFBundleIconName  -> AppIcon.icns in Contents/Resources.
 #
 # Het app-icoon wordt bij elke build vers uit scripts/appicon/icon-1024.png afgeleid
 # met sips + iconutil (beide zitten in Command Line Tools). De bron is een tijdelijk

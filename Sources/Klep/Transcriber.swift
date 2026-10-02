@@ -6,8 +6,7 @@
 /// de eerste download heeft netwerk nodig.
 ///
 /// De aanroep-volgorde (downloadAndLoad → AsrManager → loadModels → per uiting
-/// een verse `TdtDecoderState` → `transcribe`) is de in spike PL-715 (PIT-847)
-/// bewezen vorm; hier niet opnieuw verzonnen.
+/// een verse `TdtDecoderState` → `transcribe`) is in de Swift-spike getest.
 import Foundation
 import FluidAudio
 

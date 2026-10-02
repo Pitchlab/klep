@@ -41,8 +41,7 @@ public protocol MicrophonePermission: Sendable {
 }
 
 extension MicrophonePermission {
-    /// De menu-melding bij geweigerde toestemming — dezelfde `errorNotice`-route die
-    /// PL-739 voor Accessibility gebruikt.
+    /// De menu-melding bij geweigerde toestemming gebruikt dezelfde `errorNotice`-route als Toegankelijkheid.
     public static var deniedNotice: String {
         "Microfoontoegang geweigerd. Sta Klep toe in Systeeminstellingen → Privacy & beveiliging → Microfoon."
     }

@@ -2,8 +2,7 @@
 /// van een `NSMenu`. Een menu kan geen schuifregelaar met een zichtbare waarde
 /// dragen, dus elke instelling die niet aan/uit is zou naar een apart venster moeten —
 /// één klik te ver voor een drempel die je per dictaat bijstelt. Het paneel draagt
-/// gewone views, dus toggles, een dropdown en straks
-/// schuifregelaars staan op één plek.
+/// gewone views, zodat toggles, een dropdown en schuifregelaars op één plek staan.
 ///
 /// KEUZE: NSPopover, geankerd aan de statusitem-knop, niet een NSWindow met
 /// `.nonactivatingPanel`. Reden: de popover ankert zichzelf onder de knop, dwingt de
@@ -22,7 +21,7 @@
 ///    (`MenuBarPanelTests`).
 ///  - AppKit-laag (`MenuBarPanelController`), onder `#if canImport(AppKit)`: bouwt de
 ///    views uit het model en hangt de acties aan de callbacks. Wat je tekent is een
-///    mensentest (PRD, ROE §2).
+///    mensentest (handmatig te verifiëren).
 
 import Foundation
 
@@ -31,7 +30,7 @@ import Foundation
 /// Eén `NumberFormatter` voor het hele paneel én het instellingenvenster. Valkuil uit
 /// SpeechButton: het paneel schreef `1.00s` met punt en het venster `1,00s` met komma
 /// voor dezelfde waarde. Alle secondewaarden lopen door `SpeechFormat.seconds`, zodat
-/// PL-746 (auto-enter-vertraging) en elke latere drempel dezelfde komma en precisie
+/// de auto-enter-vertraging en elke latere drempel dezelfde komma en precisie
 /// tonen.
 public enum SpeechFormat {
     /// Nederlandse notatie, twee decimalen: `1,00`. Locale hard op `nl_NL` zodat de
@@ -105,8 +104,7 @@ public enum PanelAction: String, Sendable, Equatable {
     }
 }
 
-/// Eén voetknop met zijn actie en of hij aanklikbaar is. Geschiedenis staat voorlopig
-/// uit — de inhoud komt in PL-757.
+/// Eén voetknop met zijn actie en of hij aanklikbaar is.
 public struct FooterButton: Sendable, Equatable {
     public let action: PanelAction
     public let isEnabled: Bool
@@ -140,7 +138,7 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// De sneltoets die auto-enter omschakelt (bv. "⇧R⌘"). Ook achter zijn toggle.
     public var autoEnterShortcut: String
     /// Korte melding als er een permissie ontbreekt, of nil. De volledige sectie staat
-    /// in het instellingenvenster (PL-788); hier alleen dit bannertje, zodat het paneel
+    /// in het instellingenvenster; hier alleen dit bannertje, zodat het paneel
     /// over dicteren gaat en niet over configureren.
     public var permissionBanner: String?
     /// De keuzelijst voor de microfoon-dropdown.
@@ -153,7 +151,7 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     /// stille mislukking: het paneel toont dit onder de statusregel (R9).
     public var errorNotice: String?
     /// Of de luister-stip gekoppeld is; alleen dan toont de statusregel de
-    /// "terug naar het midden"-knop, zodat een dood knopje nooit verschijnt (PL-737).
+    /// "terug naar het midden"-knop, zodat een dood knopje nooit verschijnt.
     public var canRecenter: Bool
 
 
@@ -210,7 +208,7 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     }
 
     /// De tekst op de "terug naar het midden"-knop bij de statusregel; ook de
-    /// tooltip/VoiceOver-tekst. Zet de luister-stip terug in het midden (PL-737).
+    /// tooltip/VoiceOver-tekst. Zet de luister-stip terug in het midden.
     public var recenterTitle: String { "Stip naar het midden" }
 
     public var microphoneTitle: String { "Microfoon" }
@@ -238,7 +236,7 @@ public struct MenuBarPanelModel: Sendable, Equatable {
     }
 
     /// De drie voetknoppen: Instellingen, Geschiedenis, Stoppen. Alle drie aanklikbaar
-    /// sinds PL-757 de geschiedenis vult; de knop stond uit zolang er niets te zien was.
+    /// omdat de geschiedenis gegevens kan tonen.
     public func footerButtons() -> [FooterButton] {
         [
             FooterButton(action: .settings, isEnabled: true),
@@ -255,9 +253,9 @@ import AppKit
 
 /// Tekent het `MenuBarPanelModel` als een kolom views in een `NSPopover`. De volgorde,
 /// van boven naar beneden: statusregel met stip, versie en — als de stip gekoppeld is —
-/// een "terug naar het midden"-knop (PL-737); de ⚠︎-meldingen; een bannertje als er een
+/// een "terug naar het midden"-knop; de ⚠︎-meldingen; een bannertje als er een
 /// permissie ontbreekt; divider; microfoon; hands-free; auto-enter; een lege plek voor de
-/// auto-enter-vertraging (PL-746); divider; de voetrij.
+/// auto-enter-vertraging; divider; de voetrij.
 ///
 /// MICROFOON BOVENAAN, want dat is wat je het vaakst aanraakt. Daaronder de twee
 /// dictaat-toggles, allebei door `makeToggleRow` zodat ze niet meer verschillend
@@ -266,7 +264,7 @@ import AppKit
 ///
 /// WAT HIER NIET MEER STAAT: de aparte "Sneltoets"-regel (de toets staat nu tussen
 /// haakjes achter zijn toggle), de auto-start-toggle en de volledige permissiesectie.
-/// Die laatste twee staan in het instellingenvenster (PL-788); hier blijft alleen het
+/// Die laatste twee staan in het instellingenvenster; hier blijft alleen het
 /// bannertje, zodat dit paneel over dicteren gaat en niet over configureren.
 ///
 /// Runtime niet gedekt door de unit-tests: een paneel tonen vraagt een NSApplication-
@@ -287,7 +285,7 @@ public final class MenuBarPanelController: NSViewController {
     public var onToggleHandsFree: ((Bool) -> Void)?
     /// Auto-enter omgeschakeld via het paneel, met de nieuwe stand.
     public var onToggleAutoEnter: ((Bool) -> Void)?
-    /// De "terug naar het midden"-knop aangeklikt: zet de luister-stip terug (PL-737).
+    /// De "terug naar het midden"-knop aangeklikt: zet de luister-stip terug.
     public var onRecenter: (() -> Void)?
     /// Een microfoon gekozen, met de `uniqueID`.
     public var onSelectDevice: ((String) -> Void)?
@@ -395,7 +393,7 @@ public final class MenuBarPanelController: NSViewController {
         let version = Self.label(model.versionLabel)
         version.textColor = .secondaryLabelColor
         var views: [NSView] = [dot, label, NSView(), version]
-        // Alleen tekenen als de stip gekoppeld is; anders een dood knopje (PL-737).
+        // Alleen tekenen als de stip gekoppeld is; anders een dood knopje.
         if model.canRecenter {
             let recenter = NSButton(
                 title: "", target: self, action: #selector(recenterClicked))

@@ -1,4 +1,4 @@
-/// Het geschiedenisvenster (PL-757): terugzoeken wat je gedicteerd hebt, en het geheel
+/// Het geschiedenisvenster: terugzoeken wat je gedicteerd hebt, en het geheel
 /// weggooien.
 ///
 /// De knop in de voetrij stond uit zolang er niets bewaard werd. Nu er wél rijen in de
@@ -6,7 +6,7 @@
 /// alleen een bestand dat groeit.
 ///
 /// Twee dingen die de taak eist en die hier zitten: zoeken op woord, en alles wissen.
-/// De lijst is een mensentest (een venster vraagt een runloop, ROE §2); de queries
+/// De lijst vraagt handmatige verificatie omdat het venster een runloop nodig heeft; de queries
 /// erachter staan in `TranscriptStore` en zijn wél gedekt door de gate.
 #if canImport(AppKit)
 import AppKit

@@ -1,8 +1,8 @@
 # Klep
 
-Lokale dicteer-app voor macOS (Apple Silicon), vervanger van SpeechButton. Spraak → tekst bij de cursor, aangestuurd vanaf het toetsenbord, STT lokaal via Parakeet (FluidAudio/CoreML). Geen server, geen cloud, geen account. Scope en requirements: `docs/prd.md`.
+Lokale dicteer-app voor macOS op Apple Silicon. Spraak → tekst bij de cursor, aangestuurd vanaf het toetsenbord, STT lokaal via Parakeet (FluidAudio/CoreML). Geen server, geen cloud, geen account. Scope en requirements: `docs/prd.md`.
 
-Puur Swift, SwiftPM. **Command Line Tools only — Xcode is niet geïnstalleerd en komt er niet** (`docs/prd.md`, spike PL-715).
+Puur Swift en SwiftPM. De app bouwt met de macOS Command Line Tools; Xcode is niet vereist.
 
 ## Bouwen en testen (de gate)
 
@@ -58,13 +58,13 @@ Bestaat `PitchLab Local Code Signing` nog niet in je login-keychain, dan valt he
 - `Sources/Klep/` — de library: opname en VAD, transcriptie, tekstuitvoer, hotkeys, menubalk-paneel, luister-indicator, geschiedenis.
 - `Sources/KlepApp/` — de `.app`-entrypoint. `Sources/KlepCLI/` — het `klep`-commando.
 - `Tests/KlepTests/` — de gate: 234 tests in 28 suites.
-- `docs/prd.md` — PRD, requirements, spikes.
+- `docs/prd.md` — oorspronkelijke requirements en technische afwegingen.
 
 ## Versies
 
 Het versienummer dat de app in zijn paneelkop toont komt uit de laatste git-tag: `scripts/build-app.sh` leest `git describe --tags --abbrev=0` en zet die als `CFBundleShortVersionString`. Zonder tag toont hij `0.0.0`, en dat is het teken dat de build de tag niet zag.
 
-**Tag bij elke merge die iets verandert wat je in de app merkt.** Erik heeft dat op 2026-09-01 vastgelegd met `v0.1.0`, de eerste versie die echt dicteert. Bij een zelfgebouwde app die je meerdere keren per dag herbouwt is "welke draait er nu" een echte vraag, en een versienummer dat blijft staan beantwoordt hem verkeerd.
+Maak een nieuwe tag wanneer een wijziging zichtbaar is in de app. De build leest de laatste tag als versienummer; zonder nieuwe tag blijft het getoonde nummer gelijk.
 
 ```bash
 git tag -a v0.2.0 -m "<wat er veranderde>"

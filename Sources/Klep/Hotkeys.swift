@@ -13,7 +13,7 @@
 ///  - Carbon/AppKit-laag (`GlobalHotkeyManager`, onder `#if canImport(Carbon)`):
 ///    `RegisterEventHotKey`, de C-event-handler en de Input Monitoring-check via
 ///    `IOHIDCheckAccess`. Compileert in de gate; het echt afvangen van een globale
-///    toets en het verlenen van de permissie is een mensentest (PRD, ROE §2).
+///    toets en het verlenen van de permissie is een mensentest (handmatig te verifiëren).
 
 import Foundation
 
@@ -390,7 +390,7 @@ public struct HotkeyStatus: Sendable, Equatable {
     }
 
     /// Compacte titel voor de statusbalk-knop: aangevinkt vol (●), uit hol (○),
-    /// bv. "HF● AE○". Sinds PL-730 tekent de statusbalk symbolen (zie
+    /// bv. "HF● AE○". De statusbalk tekent symbolen (zie
     /// `statusSymbols()`); deze tekst blijft de VoiceOver-samenvatting én het anker
     /// van `statusTitleShowsBothStatesAtAGlance`, zodat beide standen ook in woorden
     /// afleesbaar blijven.

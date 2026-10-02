@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Genereert de tijdelijke app-icoonbron scripts/appicon/icon-1024.png: een afgeronde
-# vierkant met verloop en een witte waveform. Simpele bron, geen ontwerpwerk (PL-730).
+# vierkant met verloop en een witte waveform. Simpele bron, geen ontwerpwerk.
 # build-app.sh leidt hier met sips + iconutil de .iconset en AppIcon.icns uit af; die
 # stappen draaien op Command Line Tools zonder Python. Deze generator is alleen nodig
 # om de bron opnieuw te maken. Draai: python3 scripts/make-appicon.py

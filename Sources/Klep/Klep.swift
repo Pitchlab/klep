@@ -1,8 +1,7 @@
 /// Klep: lokale dicteer-app die spraak omzet in tekst bij de cursor.
 ///
-/// Dit is het scaffold-symbool. Echte functionaliteit (STT-core, audio-invoer,
-/// tekstuitvoer) komt in de vervolgtaken PL-700/701/702.
+/// Package-naam voor de library en de smoke-test.
 public enum Klep {
-    /// Package-naam, gebruikt door het scaffold en de smoke-test.
+    /// Naam van de app.
     public static let name = "Klep"
 }

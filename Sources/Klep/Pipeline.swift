@@ -102,8 +102,7 @@ public struct Pipeline {
 
 /// Wat `--listen` uit de argumenten wil. `--listen` en `--listen=on` zetten hands-free
 /// aan, `--listen=off` uit. Zo bedienen de CLI-vlag en het menubalk-item dezelfde
-/// stand (zie `HandsFreeStateStore`) zonder een tweede pad — precies wat PIT-900 fout
-/// deed door een aparte keten te bouwen.
+/// stand (zie `HandsFreeStateStore`) zonder een tweede pad.
 public enum ListenArgument: Sendable, Equatable {
     /// Geen `--listen` in de argumenten.
     case absent
@@ -209,7 +208,7 @@ public struct ListenMode {
     /// `--listen`: zet de gedeelde stand aan en draai `controller` tot de stroom sluit
     /// (Ctrl-C → `requestStop`). Zet de stand daarna weer uit — na afloop luistert er
     /// niets, ook bij een geweigerde microfoon. Geeft door wat `run` gaf: `false` bij een
-    /// weigering, zodat de CLI een niet-0 exit en een melding op stderr kan geven (PL-740).
+    /// weigering, zodat de CLI een niet-0 exit en een melding op stderr kan geven.
     @discardableResult
     public func turnOn(controller: HandsFreeController, device: DeviceInfo?) async -> Bool {
         state.setHandsFreeOn(true)

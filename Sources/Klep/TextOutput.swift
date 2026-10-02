@@ -54,7 +54,7 @@ public enum TextOutputError: Error, CustomStringConvertible, Equatable {
 /// Scheiding tussen twee opeenvolgende uitingen bij de cursor, zodat ze niet aan
 /// elkaar plakken ('eindelijk.En werkt').
 ///
-/// BESLIST (Erik, 2026-09-01): eindigt een uiting op een zinseinde (`.` `?` of `!`),
+/// Eindigt een uiting op een zinseinde (`.` `?` of `!`),
 /// zet er dan ONVOORWAARDELIJK een spatie ACHTER — achteraan, niet vooraan. Reden: de
 /// cursor staat daarna meteen goed om verder te typen, ook als er nooit een tweede
 /// uiting komt. De Nederlandse afkortingspunt ('bijv.') gaat hierin mee — onderscheid
@@ -76,7 +76,7 @@ public enum UtteranceSeparator {
 
 /// Hoelang de app wacht tussen de ingevoegde tekst en de Return van auto-enter.
 ///
-/// WAAROM DIT BESTAAT (Erik, eerste echte gebruik): auto-enter stuurde de Return
+/// Auto-enter stuurde de Return
 /// meteen achter het transcript aan, midden in een zin. Er zit nu een instelbare
 /// pauze tussen, zodat je kunt doorpraten voordat de regel verstuurd wordt.
 ///

@@ -1,4 +1,4 @@
-/// Systeemgeluid dempen tijdens hands-free (PL-766).
+/// Systeemgeluid dempen tijdens hands-free.
 ///
 /// WAAROM. Muziek, een video of een meeting die uit de speakers komt gaat de microfoon
 /// in en wordt meegetranscribeerd. Bij hands-free met VAD is dat erger dan bij

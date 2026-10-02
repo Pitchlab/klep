@@ -1,6 +1,6 @@
 # PRD — Klep
 
-Status: draft. Branch `feat/speech`. Owner: Erik. HQ: `pitchlab/pitchlab-speech`, doel `PL-689`.
+Historische requirements en technische afwegingen uit de ontwikkeling van Klep.
 
 ## Waarom
 
@@ -110,7 +110,7 @@ Wat er níét uit volgde, hoewel het hier wel is geconcludeerd: dat de app Pytho
 
 ## Spike 3: Parakeet native in Swift — 2026-08-31
 
-`PL-715` / `PIT-847`, uitgevoerd door de Paperclip Task Runner en nagedraaid door het board. Project: `spikes/swift-parakeet/`, verslag: `docs/spike-swift-parakeet.md`.
+Het experiment staat in `spikes/swift-parakeet/`; de resultaten staan in `docs/spike-swift-parakeet.md`.
 
 **FluidAudio 0.15.6** resolvet als SwiftPM-dependency en compileert met alleen Command Line Tools. Het laadt Parakeet TDT 0.6b v3 als CoreML op de Neural Engine — hetzelfde model, andere runtime.
 
@@ -139,7 +139,7 @@ Het Python-werk is verwijderd — uit de integratiebranch, uit de losse branches
 
 De taalkeuze stond hier als nummer 1 en is beslist: puur Swift, zie hierboven.
 
-1. **Invoegen bij de cursor: `CGEvent`-toetsaanslagen of pasteboard + Cmd-V.** Toetsaanslagen laten het plakbord met rust maar zijn traag bij lange tekst; plakken is direct maar overschrijft wat de gebruiker gekopieerd had. Bepaalt mede welke permissie R9 moet vragen. HQ: `PL-702`.
+1. **Invoegen bij de cursor: `CGEvent`-toetsaanslagen of pasteboard + Cmd-V.** Toetsaanslagen laten het plakbord met rust maar zijn traag bij lange tekst; plakken is direct maar overschrijft wat de gebruiker gekopieerd had. Bepaalt mede welke permissie R9 moet vragen.
 2. **Wat "afgeronde uiting" is in hands-free.** Stiltedrempel in seconden, en of die instelbaar moet zijn. SpeechButton gebruikt 3 s voor auto-enter. Nu FluidAudio de VAD levert, is de vraag welke van zijn parameters we blootstellen.
 3. **Model-download bij eerste start.** 473 MB. Meeleveren kan niet; ophalen bij eerste start is de enige netwerkafhankelijkheid die de app heeft en moet als zodanig gepresenteerd worden.
 4. **Streaming voor live partials.** Batch-per-uiting is de default. FluidAudio heeft een streaming-API (`StreamingUnifiedAsrManager`) die niet gemeten is. Pas oppakken als tekst-terwijl-je-praat gewenst blijkt.

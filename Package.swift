@@ -37,7 +37,7 @@ let package = Package(
     ],
     dependencies: [
         // Parakeet TDT 0.6b v3 via CoreML/Neural Engine. Versie zoals bewezen in
-        // spike PL-715 (0.12.4 -> resolvet naar 0.15.6), geen tweede aanroep.
+        // de Swift-spike (0.12.4 resolvet naar 0.15.6).
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
     ],
     targets: [
@@ -62,7 +62,7 @@ let package = Package(
             name: "KlepTests",
             dependencies: ["Klep"],
             // Geen resources: de NL-fixture wordt in de test gegenereerd met
-            // `say`+`afconvert` (zie Fixtures.swift), niet gecommit (ROE §5).
+            // `say`+`afconvert` (zie Fixtures.swift), niet ingecheckt.
             swiftSettings: [.unsafeFlags(["-F", frameworksPath])],
             linkerSettings: [.unsafeFlags(["-F", frameworksPath, "-Xlinker", "-rpath", "-Xlinker", frameworksPath])]
         ),

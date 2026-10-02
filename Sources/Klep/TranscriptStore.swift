@@ -106,7 +106,7 @@ public final class TranscriptStore: @unchecked Sendable {
     /// query-plan (`prunePlanDescription`) gegarandeerd dezelfde query zijn.
     private static let pruneSQL = "DELETE FROM transcripts WHERE recorded_at < ?;"
 
-    /// De naam die de map droeg vóór de hernoeming naar Klep (PL-731).
+    /// De naam die de map droeg vóór de hernoeming naar Klep.
     public static let legacyDirectoryName = "PitchlabSpeech"
     public static let directoryName = "Klep"
 
@@ -182,7 +182,7 @@ public final class TranscriptStore: @unchecked Sendable {
         self.log = log
         // Een echt bestand krijgt een afgeschermde map (0700) en een afgeschermd bestand
         // (0600): de geschiedenis staat als platte tekst op schijf, alleen de eigenaar
-        // mag erbij (PL-935). Een geheugen-database heeft geen bestand, dus dan niet.
+        // mag erbij. Een geheugen-database heeft geen bestand, dus dan niet.
         if sqlitePath != ":memory:" {
             try TranscriptStore.secureContainingDirectory(ofFile: sqlitePath)
         }
@@ -331,9 +331,7 @@ public final class TranscriptStore: @unchecked Sendable {
         open(path: ":memory:", log: log)
     }
 
-    /// Hoelang een uiting bewaard blijft. BESLIST door Erik op 2026-09-02: 30 dagen,
-    /// opslaan standaard aan, nog niet versleutelen — de rechten op de homedir volstaan
-    /// voorlopig. Alles wat je zegt komt op schijf, dus dit is de rem daarop.
+    /// Hoelang een uiting bewaard blijft: 30 dagen. Opslag staat standaard aan; de retentie beperkt hoelang transcripties op schijf blijven.
     public static let retentionDays = 30
 
     /// Gooit alles weg dat ouder is dan `days` dagen. Draait bij het openen, dus één
@@ -449,7 +447,7 @@ public final class TranscriptStore: @unchecked Sendable {
         }
     }
 
-    // MARK: - Rechten (PL-935)
+    // MARK: - Rechten
 
     /// Zorgt dat de map waarin het databasebestand komt bestaat en alleen voor de
     /// eigenaar leesbaar is (0700). Zet de rechten ook op een map die al bestond — hij

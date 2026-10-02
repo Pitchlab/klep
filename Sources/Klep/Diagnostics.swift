@@ -1,20 +1,17 @@
 /// Diagnostiek: een logbestand en een stderr-spiegel zodat de app niet blind draait.
-/// In een .app gaat stdout nergens heen; tot deze taak was het enige spoor een
-/// menuregel, en elke diagnose was gokken op broncode en `lsof`. Hier komt één
-/// kanaal dat de keten beschrijft: hands-free aan/uit met reden, gekozen apparaat,
+/// In een .app gaat stdout nergens heen. Het logbestand beschrijft: hands-free aan/uit met reden, gekozen apparaat,
 /// permissiestatus per soort, uiting met duur, transcript-lengte en verstreken tijd,
 /// uitvoerroute en of die slaagde, en elke fout met de plek waar hij ontstond.
 ///
 /// Twee regels bepalen de vorm:
-///  - GEEN inhoud. Transcripten staan standaard uit en horen niet in een log; er
-///    worden alleen lengtes (aantal tekens) en tijden gelogd, nooit de tekst zelf.
+///  - GEEN inhoud. Het log bevat alleen lengtes en tijden, nooit de transcripttekst.
 ///  - GEEN sample-ruis. Elke logregel beschrijft een schakel in de keten, niet elke
 ///    audio-sample of niveau-update.
 ///
 /// De gebeurtenis is een `DiagnosticEvent` — een waarde met een `line`-eigenschap —
 /// zodat de tekst aan de gebeurtenis hangt en niet als losse string door de keten
 /// zwerft. `DiagnosticLog` schrijft naar `~/.pitchlab/klep/klep.log.jsonl`, naast de config
-/// en `sessions.jsonl` van PL-696, en kapt het bestand af zodat het niet volloopt.
+/// en `sessions.jsonl`, en kapt het bestand af zodat het niet volloopt.
 /// De schakel in de keten praat tegen een `DiagnosticSink`; productie injecteert het
 /// echte logbestand, de tests een spy, zodat de gate zonder aanraken van `~/.pitchlab`
 /// draait.
@@ -38,14 +35,14 @@ public enum DiagnosticEvent: Sendable, Equatable {
     case handsFreeOn(reason: String)
     /// Hands-free uitgezet, met de bron.
     case handsFreeOff(reason: String)
-    /// Bij het opstarten herstelde hands-free-stand — getoond, maar (PL-742) niet
+    /// Bij het opstarten herstelde hands-free-stand — getoond, maar niet
     /// noodzakelijk toegepast; de regel maakt het verschil zichtbaar.
     case handsFreeRestored(on: Bool)
     /// Het apparaat waarop de keten opneemt (nil = systeemstandaard).
     case deviceSelected(name: String?)
-    /// De toestemmingsstatus per soort, vóór de opname (PL-740: geen stille stilte).
+    /// De toestemmingsstatus per soort, vóór de opname.
     case permission(kind: String, status: String)
-    /// De tijd tussen "hands-free aan" en de eerste binnengekomen sample (PL-765).
+    /// De tijd tussen "hands-free aan" en de eerste binnengekomen sample.
     /// Meet wat je aan het begin van je eerste woord kwijt bent doordat de
     /// `AVCaptureSession` nog opgezet moest worden.
     case captureReady(elapsedMs: Int)
@@ -159,7 +156,7 @@ public final class DiagnosticLog: DiagnosticSink, @unchecked Sendable {
         self.now = now
     }
 
-    /// Het standaard-logpad naast de config van PL-696: `~/.pitchlab/klep/klep.log.jsonl`.
+    /// Het standaard-logpad: `~/.pitchlab/klep/klep.log.jsonl`.
     /// De extensie zegt wat erin staat: elke regel is één JSON-record. Het eerdere
     /// `klep.log` droeg platte tekst; dezelfde naam aanhouden zou een bestaand bestand
     /// half tekst en half JSON maken, en daar struikelt elke lezer over.
