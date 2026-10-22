@@ -32,11 +32,12 @@ public actor Transcriber {
 
     /// Laadt het Parakeet-model eenmalig en houdt het warm. Idempotent: een
     /// tweede aanroep is een no-op. De eerste aanroep downloadt het model naar
-    /// de FluidAudio-cache als het nog niet op schijf staat.
+    /// `ModelDirectory.parakeet()` als het nog niet op schijf staat.
     public func warmUp() async throws {
         guard asr == nil else { return }
         loads += 1
-        let models = try await AsrModels.downloadAndLoad(version: .v3)
+        let models = try await AsrModels.downloadAndLoad(
+            to: try ModelDirectory.parakeet(), version: .v3)
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)
         decoderLayers = await manager.decoderLayerCount

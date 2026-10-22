@@ -65,7 +65,7 @@ Gemeten op deze machine, niet aangenomen:
 | Swift | 6.2.4 |
 | Xcode | Niet geïnstalleerd — alleen Command Line Tools, en dat is **genoeg** (twee spikes) |
 | STT | **FluidAudio 0.15.6**, Parakeet TDT 0.6b v3 als CoreML op de Neural Engine |
-| Model op schijf | 473 MB, in `~/Library/Application Support/FluidAudio/Models/` |
+| Model op schijf | 473 MB, in `~/Library/Application Support/Klep/Models/` |
 | Python | **Niet gebruikt.** Zie de beslissing hieronder. |
 
 ## Spike: Xcode is niet nodig — 2026-08-31

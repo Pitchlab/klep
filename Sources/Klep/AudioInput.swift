@@ -278,7 +278,8 @@ public actor UtteranceSegmenter {
     /// Laadt het VAD-model eenmalig. Eerste keer downloaden, daarna offline.
     public func warmUp() async throws {
         guard vad == nil else { return }
-        let manager = try await VadManager(config: .default)
+        let manager = try await VadManager(
+            config: .default, modelDirectory: try ModelDirectory.base())
         streamState = await manager.makeStreamState()
         vad = manager
     }
