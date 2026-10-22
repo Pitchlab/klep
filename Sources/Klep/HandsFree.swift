@@ -103,6 +103,9 @@ public actor HandsFreeController {
 
     /// Draait de keten nu.
     public private(set) var isListening = false
+    /// Hands-free ging uit voordat de audiobron startte (tijdens de toestemming of het
+    /// opwarmen). `run` start de bron dan niet meer; anders luistert hij zonder eigenaar door.
+    private var stopRequested = false
     /// De laatste fout die de uitvoerlaag gaf, of nil. Voor het menu (geen stil falen).
     public private(set) var lastError: String?
     /// Gemeld bij een uitvoerfout, zodat de AppKit-laag het menu kan bijwerken.
@@ -172,23 +175,7 @@ public actor HandsFreeController {
         }
         do {
             try await transcriber.warmUp()
-            // De tijd tot de eerste sample laat zien hoeveel audio aan het begin van het eerste woord verloren kan gaan.
-            let startedAt = Date()
-            var firstSampleSeen = false
-            let events = try audio.start(device: device)
-            for await event in events {
-                switch event {
-                case .level(let level):
-                    if !firstSampleSeen {
-                        firstSampleSeen = true
-                        diagnostics.log(.captureReady(
-                            elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1000)))
-                    }
-                    indicator.update(level: level)
-                case .utterance(let utterance):
-                    await handle(utterance)
-                }
-            }
+            if !stopRequested { try await listen(device: device) }
         } catch {
             report(error, origin: "audiobron")
         }
@@ -200,8 +187,31 @@ public actor HandsFreeController {
         return true
     }
 
+    /// Start de audiobron en verwerkt zijn events tot de stroom sluit.
+    private func listen(device: DeviceInfo?) async throws {
+        // De tijd tot de eerste sample laat zien hoeveel audio aan het begin van het eerste woord verloren kan gaan.
+        let startedAt = Date()
+        var firstSampleSeen = false
+        let events = try audio.start(device: device)
+        for await event in events {
+            switch event {
+            case .level(let level):
+                if !firstSampleSeen {
+                    firstSampleSeen = true
+                    diagnostics.log(.captureReady(
+                        elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1000)))
+                }
+                indicator.update(level: level)
+            case .utterance(let utterance):
+                await handle(utterance)
+            }
+        }
+    }
+
     /// Vraag de audiobron te stoppen; dat sluit de stroom en laat `run` terugkeren.
+    /// Komt de stop vóór de start, dan slaat `run` het starten over.
     public func requestStop() async {
+        stopRequested = true
         await audio.stop()
     }
 

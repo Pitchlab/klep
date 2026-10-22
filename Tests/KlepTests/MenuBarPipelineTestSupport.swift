@@ -102,6 +102,43 @@ enum MenuBarPipelineTestSupport {
         func append(_ text: String) { lock.withLock { buffer += text } }
     }
 
+    /// Audiobron die telt hoe vaak hij gestart is. Sluit de stroom meteen.
+    final class CountingAudioSource: HandsFreeAudioSource, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _starts = 0
+        var startCount: Int { lock.withLock { _starts } }
+        func start(device: DeviceInfo?) throws -> AsyncStream<HandsFreeEvent> {
+            lock.withLock { _starts += 1 }
+            return AsyncStream { $0.finish() }
+        }
+        func stop() async {}
+    }
+
+    /// Transcriber die tijdens het opwarmen `onWarmUp` draait: zo valt een hands-free-uit
+    /// precies tussen toestemming en het starten van de audiobron.
+    final class HookedTranscriber: UtteranceTranscribing, @unchecked Sendable {
+        var onWarmUp: (@Sendable () async -> Void)?
+        func warmUp() async throws { await onWarmUp?() }
+        func transcribe(_ utterance: Utterance) async throws -> String { "" }
+    }
+
+    /// Zet hands-free uit terwijl het model opwarmt en geeft terug hoe vaak de
+    /// audiobron daarna nog startte.
+    static func stopDuringWarmUp() async -> Int {
+        let audio = CountingAudioSource()
+        let transcriber = HookedTranscriber()
+        let controller = HandsFreeController(
+            audio: audio,
+            transcriber: transcriber,
+            sink: RecordingSink(),
+            indicator: ListeningIndicator(),
+            permission: MicrophonePermissionTestSupport.StubPermission(status: .authorized),
+            autoEnter: { false })
+        transcriber.onWarmUp = { [weak controller] in await controller?.requestStop() }
+        await controller.run(device: nil)
+        return audio.startCount
+    }
+
     // MARK: - Drivers
 
     /// Wat één hands-free-run door de stub-keten opleverde.

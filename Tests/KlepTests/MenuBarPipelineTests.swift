@@ -33,6 +33,12 @@ import Testing
         #expect(result.sinkCalls.isEmpty)
     }
 
+    /// Hands-free uit tijdens het opwarmen: de audiobron start daarna niet meer. Eerder
+    /// startte hij alsnog en luisterde hij door zonder sessie die hem kon stoppen.
+    @Test func stopDuringWarmUpNeverStartsCapture() async {
+        #expect(await MenuBarPipelineTestSupport.stopDuringWarmUp() == 0)
+    }
+
     // MARK: - Indicator
 
     /// De indicator is zichtbaar tijdens het luisteren — gevoed met het echte
